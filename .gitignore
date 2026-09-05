@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+
+# 后端运行时数据
+backend/storage/app.db
+backend/storage/upload/
+backend/storage/scripts/
+backend/storage/executions/
+
+# 前端
+node_modules/
+dist/
+
+# 环境与编辑器
+.env
+.DS_Store
+.idea/
+.vscode/
