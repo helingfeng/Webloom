@@ -1,0 +1,342 @@
+frontend/src/stores/workspaceStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-72
+backend/app/services/requirement_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-62
+frontend/src/views/DatasourcesView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-251
+backend/app/routers/code.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-39
+frontend/src/types/workspace.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-17
+frontend/src/components/CodeEditor.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-212
+backend/app/schemas/requirement.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-24
+frontend/src/api/recordings.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-14
+frontend/src/components/RecordDialog.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-218
+backend/app/agent_skills/script-authoring/SKILL.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-70
+frontend/src/api/flows.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-28
+frontend/src/views/DataViewsView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-393
+backend/app/routers/flows.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-100
+frontend/vitest.config.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-14
+backend/app/routers/global_variables.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-48
+backend/app/models/query_history.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-36
+backend/app/routers/datasources.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-181
+backend/app/schemas/datasource.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-117
+frontend/src/views/DatasourceWorkbenchView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-711
+frontend/tsconfig.node.json
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-27
+backend/app/schemas/flow.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-34
+frontend/src/utils/markdownCases.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-131
+backend/.env.example
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-5
+frontend/vite.config.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-44
+backend/app/routers/mcp.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-63
+backend/app/services/skill_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-290
+backend/app/schemas/global_variable.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-28
+AGENTS.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-104
+backend/app/models/global_variable.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-26
+frontend/src/components/ScriptEditor.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-334
+backend/app/routers/recordings.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-47
+frontend/src/api/mcp.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-23
+frontend/src/api/code.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-18
+frontend/src/components/icons/IconCommunity.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-7
+backend/app/schemas/code.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-25
+backend/app/main.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-87
+frontend/src/assets/logo.svg
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1
+frontend/src/main.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-22
+backend/app/services/datasource_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-48
+frontend/src/assets/main.css
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-21
+frontend/src/components/ExecutionPanel.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-331
+frontend/src/types/datasource.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-104
+backend/app/database.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-141
+frontend/src/views/ScriptsView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-240
+backend/app/services/datasource_query_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-504
+backend/app/services/test_case_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-166
+frontend/src/views/ScriptDetailView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-126
+frontend/src/types/flow.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-44
+frontend/src/types/script.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-54
+backend/app/mcp/__init__.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-22
+backend/app/services/global_variable_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-132
+frontend/tsconfig.app.json
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-18
+frontend/src/components/MindMapDialog.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-77
+frontend/src/components/icons/IconSupport.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-7
+frontend/src/assets/base.css
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-91
+backend/app/services/execution_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-66
+frontend/src/stores/globalVariableStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-45
+backend/requirements.txt
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-15
+frontend/src/api/workspace.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-18
+backend/app/routers/requirements.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-53
+backend/app/models/execution.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-24
+frontend/src/api/dataViews.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-26
+frontend/src/stores/counter.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-12
+frontend/src/views/ExecutionsView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-149
+backend/mysql_ddl.sql
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-186
+frontend/src/api/globalVariables.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-18
+backend/app/services/script_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-64
+backend/app/models/script.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-36
+frontend/src/api/executions.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-30
+frontend/src/stores/executionStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-59
+frontend/src/views/GlobalVariablesView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-201
+frontend/src/views/McpView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-279
+backend/app/schemas/data_view.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-47
+backend/app/models/module.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-20
+backend/app/models/requirement.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-21
+frontend/src/components/TestCaseImportDialog.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-226
+frontend/env.d.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1
+backend/app/mcp/server.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-621
+backend/app/services/query_history_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-88
+backend/app/routers/modules.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-51
+backend/app/routers/scripts.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-99
+frontend/src/api/scripts.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-32
+backend/app/models/data_view.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-31
+frontend/src/types/mcp.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-39
+frontend/src/types/testCase.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-108
+frontend/src/components/FlowEditor.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-430
+backend/app/services/workspace_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-68
+backend/app/routers/workspace.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-51
+frontend/src/api/testCases.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-88
+backend/app/schemas/execution.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-23
+frontend/src/components/AppLayout.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-129
+frontend/src/stores/dataViewStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-48
+frontend/src/utils/format.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-18
+backend/app/services/data_view_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-110
+backend/app/routers/test_cases.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-113
+frontend/src/api/datasources.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-82
+backend/scripts/migrate_sqlite_to_mysql.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-95
+frontend/src/types/dataView.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-34
+backend/README.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-122
+backend/app/services/agent_skill_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-84
+backend/app/models/workspace.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-17
+backend/app/models/flow.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-29
+frontend/src/views/FlowsView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-81
+backend/app/schemas/test_case.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-79
+backend/app/agent_skills/script-maintenance/SKILL.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-48
+backend/app/services/code_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-98
+frontend/src/stores/testCaseStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-125
+frontend/src/views/TestCasesView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-873
+backend/app/schemas/module.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-23
+backend/app/schemas/script.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-59
+backend/app/engine/runner.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-314
+backend/app/models/datasource.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-25
+frontend/src/components/icons/IconTooling.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-19
+backend/app/services/module_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-52
+frontend/src/views/FlowDetailView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-114
+backend/app/schemas/skill.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-24
+backend/app/models/__init__.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-27
+backend/app/routers/skills.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-38
+backend/app/models/skill.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-21
+backend/app/routers/executions.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-68
+README.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-145
+backend/app/models/test_case.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-30
+backend/app/services/script_run_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-119
+frontend/src/views/WorkspacesView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-149
+frontend/tsconfig.json
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-14
+frontend/src/types/globalVariable.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-20
+frontend/.gitignore
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-39
+frontend/src/types/execution.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-12
+frontend/README.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-94
+frontend/src/views/HomeView.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-121
+backend/app/routers/data_views.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-94
+backend/app/services/recording_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-218
+frontend/src/App.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-18
+frontend/src/stores/datasourceStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-75
+frontend/src/stores/scriptStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-73
+frontend/src/router/index.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-85
+frontend/src/components/icons/IconDocumentation.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-7
+backend/scripts/gen_mysql_ddl.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-125
+backend/app/agent_skills/script-execution/SKILL.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-44
+backend/app/websocket.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-29
+frontend/index.html
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-13
+frontend/tsconfig.vitest.json
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-19
+backend/storage/测试用例示例-商城下单与支付.md
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-61
+frontend/src/types/recording.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-15
+backend/app/schemas/__init__.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-12
+frontend/src/components/icons/IconEcosystem.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-7
+frontend/src/api/client.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-11
+backend/app/engine/mock_generator.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-23
+frontend/package.json
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-44
+backend/app/services/flow_service.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-279
+frontend/src/utils/__tests__/markdownCases.spec.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-60
+backend/app/config.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-26
+.gitignore
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-21
+frontend/src/stores/flowStore.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-67
+frontend/src/components/SqlInput.vue
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-211
+frontend/src/types/code.ts
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-15
+backend/app/schemas/workspace.py
+  s_0ec4f3902322c5::t_8fd9b4e3788853 1-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "1fe9e1dea4796228ad0c9bf12be2d7e57cd55986",
+  "prompts": {},
+  "sessions": {
+    "s_0ec4f3902322c5": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "01a0715f-69ab-7870-9f27-ee20293d09a8",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "helingfeng <857190327@qq.com>",
+      "custom_attributes": {
+        "operation_id": "call_18023277f9ab4c408d58ff74",
+        "session_id": "01a0715f-69ab-7870-9f27-ee20293d09a8",
+        "tool_use_id": "call_18023277f9ab4c408d58ff74",
+        "external_session_id": "01a0715f-69ab-7870-9f27-ee20293d09a8",
+        "source_scene": "agent",
+        "client_type": "cli",
+        "runtime_client": "traex-cli",
+        "tool_name": "Shell",
+        "edit_kind": "bash"
+      }
+    }
+  }
+}
