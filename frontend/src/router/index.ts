@@ -79,6 +79,26 @@ const router = createRouter({
       name: 'mcp',
       component: () => import('../views/McpView.vue'),
     },
+    {
+      path: '/open-apps',
+      name: 'open-apps',
+      component: () => import('../views/OpenAppsView.vue'),
+    },
+    {
+      path: '/open-apis',
+      name: 'open-apis',
+      component: () => import('../views/OpenApisView.vue'),
+    },
+    {
+      path: '/open-logs',
+      name: 'open-logs',
+      component: () => import('../views/OpenLogsView.vue'),
+    },
+    {
+      path: '/open-docs',
+      name: 'open-docs',
+      component: () => import('../views/OpenDocsView.vue'),
+    },
   ],
 })
 

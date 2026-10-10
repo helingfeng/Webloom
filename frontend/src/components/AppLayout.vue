@@ -10,7 +10,17 @@ onMounted(() => {
   wsStore.fetchWorkspaces()
 })
 
-const menuItems = [
+interface MenuLeaf {
+  path: string
+  label: string
+  icon: string
+}
+
+interface MenuNode extends MenuLeaf {
+  children?: MenuLeaf[]
+}
+
+const menuItems: MenuNode[] = [
   { path: '/', label: '首页', icon: 'HomeFilled' },
   { path: '/scripts', label: '脚本管理', icon: 'Document' },
   { path: '/flows', label: '流程编排', icon: 'Share' },
@@ -21,6 +31,17 @@ const menuItems = [
   { path: '/datasources', label: '数据源', icon: 'Coin' },
   { path: '/data-views', label: '数据视图', icon: 'DataAnalysis' },
   { path: '/mcp', label: 'MCP 服务', icon: 'Connection' },
+  {
+    path: '/open-platform',
+    label: '开放平台',
+    icon: 'Platform',
+    children: [
+      { path: '/open-apps', label: '开放应用', icon: 'Avatar' },
+      { path: '/open-apis', label: '开放接口', icon: 'Connection' },
+      { path: '/open-logs', label: '调用日志', icon: 'Tickets' },
+      { path: '/open-docs', label: '接入文档', icon: 'Reading' },
+    ],
+  },
 ]
 
 function isActive(path: string) {
@@ -59,17 +80,33 @@ function isActive(path: string) {
         text-color="#bfcbd9"
         active-text-color="#409EFF"
       >
-        <el-menu-item
-          v-for="item in menuItems"
-          :key="item.path"
-          :index="item.path"
-          :class="{ active: isActive(item.path) }"
-        >
-          <el-icon>
-            <component :is="item.icon" />
-          </el-icon>
-          <span>{{ item.label }}</span>
-        </el-menu-item>
+        <template v-for="item in menuItems" :key="item.path">
+          <el-sub-menu v-if="item.children" :index="item.path">
+            <template #title>
+              <el-icon>
+                <component :is="item.icon" />
+              </el-icon>
+              <span>{{ item.label }}</span>
+            </template>
+            <el-menu-item
+              v-for="child in item.children"
+              :key="child.path"
+              :index="child.path"
+              :class="{ active: isActive(child.path) }"
+            >
+              <el-icon>
+                <component :is="child.icon" />
+              </el-icon>
+              <span>{{ child.label }}</span>
+            </el-menu-item>
+          </el-sub-menu>
+          <el-menu-item v-else :index="item.path" :class="{ active: isActive(item.path) }">
+            <el-icon>
+              <component :is="item.icon" />
+            </el-icon>
+            <span>{{ item.label }}</span>
+          </el-menu-item>
+        </template>
       </el-menu>
     </el-aside>
     <el-container>
@@ -90,6 +127,15 @@ function isActive(path: string) {
   background-color: #304156;
   color: #fff;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.menu {
+  border-right: none;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .logo {
@@ -109,10 +155,6 @@ function isActive(path: string) {
 
 .workspace-select {
   width: 100%;
-}
-
-.menu {
-  border-right: none;
 }
 
 .main-content {
