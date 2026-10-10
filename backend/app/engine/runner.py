@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 from datetime import datetime
 from typing import Callable
 from urllib.parse import urlparse
@@ -248,14 +249,6 @@ async def execute_script_code(
         "PYTHONUNBUFFERED": "1",
     }
 
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        str(run_file),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-
     logs: list[str] = []
 
     async def read_stream(stream, prefix: str):
@@ -273,32 +266,52 @@ async def execute_script_code(
                 log_callback(log_line)
 
     try:
-        await asyncio.wait_for(
-            asyncio.gather(
-                read_stream(process.stdout, ""),
-                read_stream(process.stderr, ""),
-            ),
-            timeout=settings.script_execution_timeout,
-        )
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        raise ScriptExecutionError(
-            "Script execution timed out", "".join(logs)
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(run_file),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
-    return_code = await process.wait()
-    full_logs = "".join(logs)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    read_stream(process.stdout, ""),
+                    read_stream(process.stderr, ""),
+                ),
+                timeout=settings.script_execution_timeout,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise ScriptExecutionError(
+                "Script execution timed out", "".join(logs)
+            )
 
-    if return_code != 0:
-        reason = _extract_error_line(full_logs)
-        message = f"Script exited with code {return_code}"
-        if reason:
-            message += f": {reason}"
-        raise ScriptExecutionError(message, full_logs)
+        return_code = await process.wait()
+        full_logs = "".join(logs)
 
-    outputs = _parse_outputs(full_logs)
-    return full_logs, outputs
+        if return_code != 0:
+            reason = _extract_error_line(full_logs)
+            message = f"Script exited with code {return_code}"
+            if reason:
+                message += f": {reason}"
+            raise ScriptExecutionError(message, full_logs)
+
+        outputs = _parse_outputs(full_logs)
+        return full_logs, outputs
+    finally:
+        # 运行文件用后即删（成功/失败/超时统一清理），防止临时目录无限堆积
+        run_file.unlink(missing_ok=True)
+
+
+def cleanup_execution_temp_files(execution_id: int) -> None:
+    """清理某次执行的全部临时产物（运行脚本 + 实时画面帧）；幂等可重复调用"""
+    for path in settings.executions_dir.glob(f"run_{execution_id}_*.py"):
+        path.unlink(missing_ok=True)
+    frame = settings.executions_dir / f"frame_{execution_id}.jpg"
+    frame.unlink(missing_ok=True)
 
 
 def _parse_outputs(text: str) -> dict:
@@ -312,3 +325,4 @@ def _parse_outputs(text: str) -> dict:
             except json.JSONDecodeError:
                 return {"_raw_output": json_str}
     return {}
+

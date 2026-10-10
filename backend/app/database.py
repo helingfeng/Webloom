@@ -7,13 +7,18 @@ from app.config import settings
 # 统一主键/ID 列类型：MySQL 下为 bigint unsigned，其他方言回退 BigInteger
 BigIntUnsigned = BigInteger().with_variant(BIGINT(unsigned=True), "mysql")
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-)
+_engine_kwargs: dict = {
+    "echo": False,
+    "future": True,
+    "pool_pre_ping": True,
+    "pool_recycle": 3600,
+}
+# 连接池参数仅 MySQL 方言支持（SQLite 测试库不接受这些参数）
+if settings.database_url.startswith("mysql"):
+    _engine_kwargs["pool_size"] = settings.database_pool_size
+    _engine_kwargs["max_overflow"] = settings.database_max_overflow
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     engine,

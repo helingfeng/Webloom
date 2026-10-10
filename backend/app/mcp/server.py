@@ -42,6 +42,7 @@ from app.services import (
 )
 from app.services.global_variable_service import extract_domain
 from app.services.script_run_service import start_script_execution
+from app.task_queue import QueueUnavailableError
 
 INSTRUCTIONS = """小鱼（fishcode）自动化测试与数据采集平台 MCP 服务：脚本管理 + 测试用例管理 + 数据源查询。
 
@@ -49,7 +50,8 @@ INSTRUCTIONS = """小鱼（fishcode）自动化测试与数据采集平台 MCP �
 1. 用 list_workspaces 查项目空间列表（拿 workspace_id），用 list_scripts 查脚本
    （可按 workspace_id 过滤），get_script 看完整代码与参数定义；
 2. create_script 创建、update_script 部分更新（只传需要改的字段）、delete_script 删除；
-3. 运行是异步两步式：run_script 立即返回 execution_id，随后每 3-5 秒调用
+3. 运行是异步两步式：run_script 将任务提交执行队列并立即返回 execution_id
+   （status 可能为 pending，表示排队中等待 worker 调度），随后每 3-5 秒调用
    get_execution(execution_id) 轮询，直到 finished 为 true；
 4. 脚本代码体内可直接使用 INPUTS / OUTPUTS / GLOBAL_VARS / GLOBAL_HEADERS /
    GLOBAL_LOCAL_STORAGE 与 page / context / browser，无需自行导入；
@@ -225,7 +227,7 @@ async def run_script(
     mode: Literal["manual", "mock"] | None = None,
     headless: bool | None = None,
 ) -> dict:
-    """异步运行脚本，立即返回 execution_id（不等执行完成）。
+    """异步运行脚本：任务提交执行队列后立即返回 execution_id（不等执行完成）。
     mode=manual 使用 inputs 实参；mode=mock 按定义自动生成 mock 输入；
     不传 mode 时使用脚本保存的 run_mode，不传 headless 时使用脚本保存的 headless。
     之后用 get_execution(execution_id) 轮询，建议间隔 3-5 秒。"""
@@ -233,24 +235,29 @@ async def run_script(
         script = await script_service.get_script(db, script_id)
         if not script:
             raise ToolError(f"脚本 {script_id} 不存在")
-        execution = await start_script_execution(
-            db,
-            script,
-            mode=mode or script.run_mode,
-            inputs=inputs or {},
-            headless=script.headless if headless is None else headless,
-        )
+        try:
+            execution = await start_script_execution(
+                db,
+                script,
+                mode=mode or script.run_mode,
+                inputs=inputs or {},
+                headless=script.headless if headless is None else headless,
+            )
+        except QueueUnavailableError as exc:
+            raise ToolError(
+                "执行队列不可用：请确认 Redis 与执行 worker（arq）已启动"
+            ) from exc
     return {
         "execution_id": execution.id,
-        "status": "running",
+        "status": execution.status,
         "next_step": "调用 get_execution(execution_id) 轮询，直到 finished 为 true",
     }
 
 
 @mcp.tool()
 async def get_execution(execution_id: int) -> dict:
-    """查询执行结果：status 为 running/success/failed；finished=true 时
-    logs 与 outputs 为最终值。"""
+    """查询执行结果：status 为 pending（排队中）/running/success/failed；
+    finished=true 时 logs 与 outputs 为最终值。"""
     async with AsyncSessionLocal() as db:
         execution = await execution_service.get_execution(db, execution_id)
     if not execution:
@@ -282,12 +289,9 @@ async def get_auth_credentials(domain_or_url: str) -> dict:
     if not host:
         raise ToolError(f"无法从 {domain_or_url} 解析出域名")
     async with AsyncSessionLocal() as db:
-        headers = await global_variable_service.get_active_headers(db, start_url)
-        gvars = await global_variable_service.get_active_vars(db, start_url)
-        local_storage = await global_variable_service.get_active_local_storage(
-            db, start_url
+        headers, gvars, local_storage, cookies = (
+            await global_variable_service.get_active_globals_grouped(db, start_url)
         )
-        cookies = await global_variable_service.get_active_cookies(db, start_url)
     return {
         "domain": host,
         "headers": headers,

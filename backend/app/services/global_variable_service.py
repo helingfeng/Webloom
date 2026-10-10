@@ -61,6 +61,41 @@ async def delete_global_variable(db: AsyncSession, var: GlobalVariable) -> None:
     await db.commit()
 
 
+async def get_active_globals_grouped(
+    db: AsyncSession, start_url: str = ""
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], list[dict]]:
+    """一次查询取回全部启用的全局变量并按类型分组（替代逐类型 4 次全表查询）。
+
+    返回 (headers, vars, local_storage, cookies)，各分组语义与
+    get_active_headers / get_active_vars / get_active_local_storage /
+    get_active_cookies 完全一致。
+    """
+    host = extract_domain(start_url)
+    result = await db.execute(
+        select(GlobalVariable).where(GlobalVariable.enabled.is_(True))
+    )
+    headers: dict[str, str] = {}
+    gvars: dict[str, str] = {}
+    local_storage: dict[str, str] = {}
+    cookies: list[dict] = []
+    for v in result.scalars().all():
+        if not _domain_matches(v.domain, host):
+            continue
+        if v.type == "header":
+            headers[v.name] = v.value
+        elif v.type == "variable":
+            gvars[v.name] = v.value
+        elif v.type == "localStorage":
+            local_storage[v.name] = v.value
+        elif v.type == "cookie":
+            # cookie 所属域名：优先变量绑定域名，否则用起始 URL host（去端口）
+            cookie_domain = (v.domain or host).split(":")[0]
+            cookies.append(
+                {"name": v.name, "value": v.value, "domain": cookie_domain, "path": "/"}
+            )
+    return headers, gvars, local_storage, cookies
+
+
 async def get_active_headers(db: AsyncSession, start_url: str = "") -> dict[str, str]:
     host = extract_domain(start_url)
     result = await db.execute(

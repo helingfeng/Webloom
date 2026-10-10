@@ -74,22 +74,29 @@ class DatasourceConnectionManager:
 
     def __init__(self) -> None:
         self._engines: dict[tuple[int, str], AsyncEngine] = {}
-        self._lock = asyncio.Lock()
+        # master 锁只保护 _locks 字典本身；不同 key 的建连/销毁互不阻塞
+        self._master = asyncio.Lock()
+        self._locks: dict[tuple[int, str], asyncio.Lock] = {}
+
+    async def _key_lock(self, key: tuple[int, str]) -> asyncio.Lock:
+        async with self._master:
+            return self._locks.setdefault(key, asyncio.Lock())
 
     async def get_engine(
         self, ds: Datasource, database: str | None = None
     ) -> AsyncEngine:
         effective = database or ds.database
         key = (ds.id, effective)
-        async with self._lock:
+        lock = await self._key_lock(key)
+        async with lock:
             engine = self._engines.get(key)
             if engine is not None:
                 return engine
             engine = create_async_engine(
                 _build_url(ds.host, ds.port, ds.user, ds.password, effective),
                 pool_pre_ping=True,
-                pool_size=2,
-                max_overflow=3,
+                pool_size=settings.datasource_pool_size,
+                max_overflow=settings.datasource_max_overflow,
                 pool_recycle=3600,
             )
             self._engines[key] = engine
@@ -97,14 +104,30 @@ class DatasourceConnectionManager:
 
     async def invalidate(self, ds_id: int) -> None:
         """释放该数据源全部库的 engine（切库/配置变更后连接状态不可复用）"""
-        async with self._lock:
+        async with self._master:
             keys = [k for k in self._engines if k[0] == ds_id]
-            engines = [self._engines.pop(k) for k in keys]
-        for engine in engines:
+        for key in keys:
+            await self.invalidate_engine(ds_id, key[1])
+
+    async def invalidate_engine(self, ds_id: int, database: str | None = None) -> None:
+        """仅释放 (datasource_id, database) 对应的 engine；database=None 时退化为整个数据源。
+
+        高并发下一个库的慢查询超时只重建该库的连接池，不殃及其他库。
+        """
+        if database is None:
+            await self.invalidate(ds_id)
+            return
+        key = (ds_id, database)
+        # 与 get_engine 按 key 互斥：等在途建连完成后再销毁
+        lock = await self._key_lock(key)
+        async with lock:
+            async with self._master:
+                engine = self._engines.pop(key, None)
+        if engine is not None:
             await engine.dispose()
 
     async def dispose_all(self) -> None:
-        async with self._lock:
+        async with self._master:
             engines = list(self._engines.values())
             self._engines.clear()
         for engine in engines:
@@ -409,8 +432,8 @@ async def execute_query(
         result.elapsed_ms = _elapsed()
         return result
     except TimeoutError:
-        # 被取消的连接状态不可知，必须销毁
-        await connection_manager.invalidate(ds.id)
+        # 被取消的连接状态不可知，必须销毁（仅该库，不殃及同数据源其他库）
+        await connection_manager.invalidate_engine(ds.id, database or ds.database)
         return QueryResult(
             success=False,
             statement_type="query" if is_query else "execute",
@@ -418,7 +441,7 @@ async def execute_query(
             elapsed_ms=_elapsed(),
         )
     except OperationalError:
-        await connection_manager.invalidate(ds.id)
+        await connection_manager.invalidate_engine(ds.id, database or ds.database)
         return QueryResult(
             success=False,
             statement_type="query" if is_query else "execute",

@@ -4,12 +4,15 @@ sqlalchemy==2.0.52
 aiosqlite==0.20.0  # 平台库已切 MySQL，此项仅供 scripts/migrate_sqlite_to_mysql.py 读 SQLite 源
 pydantic>=2.11,<3
 pydantic-settings==2.6.1
-pytest==8.3.3
+pytest==9.1.1
 httpx==0.27.2
 playwright==1.49.1
 python-multipart==0.0.17
 aiomysql==0.2.0  # 平台主库驱动 + 数据源查询
 cryptography>=42.0.0
+arq==0.28.0  # 执行任务队列（worker 进程）
+redis==5.3.1  # Redis 客户端（日志 pub/sub、队列状态）
 black==24.8.0
 sqlglot==30.17.0
 mcp==1.29.1
+pytest-asyncio==1.4.0  # backend/tests 异步用例

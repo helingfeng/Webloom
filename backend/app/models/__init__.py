@@ -10,6 +10,7 @@ from app.models.requirement import Requirement
 from app.models.module import Module
 from app.models.test_case import TestCase
 from app.models.query_history import QueryHistory
+from app.models.open_platform import OpenApp, OpenApiRoute, OpenApiLog
 
 __all__ = [
     "Script",
@@ -24,4 +25,7 @@ __all__ = [
     "Module",
     "TestCase",
     "QueryHistory",
+    "OpenApp",
+    "OpenApiRoute",
+    "OpenApiLog",
 ]

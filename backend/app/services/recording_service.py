@@ -46,12 +46,9 @@ async def start_recording(start_url: str) -> RecordingSession:
 
     # 按录制起始 URL 的域名加载全局变量（不传则仅加载未绑定域名的全局变量）
     async with AsyncSessionLocal() as db:
-        headers = await global_variable_service.get_active_headers(db, start_url)
-        gvars = await global_variable_service.get_active_vars(db, start_url)
-        local_storage = await global_variable_service.get_active_local_storage(
-            db, start_url
+        headers, gvars, local_storage, cookies = (
+            await global_variable_service.get_active_globals_grouped(db, start_url)
         )
-        cookies = await global_variable_service.get_active_cookies(db, start_url)
 
     session.applied_globals = {
         "headers": headers,

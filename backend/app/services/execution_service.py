@@ -1,5 +1,6 @@
 from sqlalchemy import delete, func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.engine.runner import cleanup_execution_temp_files
 from app.models.execution import Execution
 from app.models.script import Script
 from app.models.flow import Flow
@@ -58,9 +59,13 @@ async def get_execution(db: AsyncSession, execution_id: int) -> Execution | None
 async def delete_execution(db: AsyncSession, execution: Execution) -> None:
     await db.delete(execution)
     await db.commit()
+    cleanup_execution_temp_files(execution.id)
 
 
 async def clear_executions(db: AsyncSession) -> int:
+    ids = (await db.execute(select(Execution.id))).scalars().all()
     result = await db.execute(delete(Execution))
     await db.commit()
+    for execution_id in ids:
+        cleanup_execution_temp_files(execution_id)
     return result.rowcount or 0

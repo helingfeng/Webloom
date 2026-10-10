@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.database import init_db
@@ -19,17 +19,28 @@ from app.routers import (
     requirements,
     modules,
     test_cases,
+    open_platform,
 )
-from app.websocket import manager
+from app.services import log_stream_service
 from app.services.datasource_query_service import connection_manager
+from app.services.open_api_service import close_proxy_client
+from app.task_queue import close_pool, get_pool, queue_stats
+from app.task_queue import QueueUnavailableError
 from app.mcp import mcp, mount_mcp
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # 预热任务队列连接；Redis 未启动时 API 照常服务（run 接口返回 503，health 暴露状态）
+    try:
+        await get_pool()
+    except QueueUnavailableError:
+        pass
     async with mcp.session_manager.run():
         yield
+    await close_pool()
+    await close_proxy_client()
     await connection_manager.dispose_all()
 
 
@@ -64,23 +75,23 @@ app.include_router(mcp_api.router, prefix="/api/mcp", tags=["mcp"])
 app.include_router(requirements.router, prefix="/api/requirements", tags=["requirements"])
 app.include_router(modules.router, prefix="/api/modules", tags=["modules"])
 app.include_router(test_cases.router, prefix="/api/test-cases", tags=["test-cases"])
+# 开放平台：管理端（应用/接口/日志）+ 外部开放端点（/open，签名认证）
+app.include_router(open_platform.open_apps_router, prefix="/api/open-apps", tags=["open"])
+app.include_router(open_platform.open_apis_router, prefix="/api/open-apis", tags=["open"])
+app.include_router(open_platform.open_logs_router, prefix="/api/open-logs", tags=["open"])
+app.include_router(open_platform.open_router, prefix="/open", tags=["open"])
 
 app.mount("/storage", StaticFiles(directory=settings.storage_dir), name="storage")
 
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "queue": await queue_stats()}
 
 
 @app.websocket("/api/ws/executions/{execution_id}")
 async def execution_websocket(websocket: WebSocket, execution_id: int):
-    await manager.connect(execution_id, websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(execution_id, websocket)
+    await log_stream_service.stream_execution_logs(websocket, execution_id)
 
 
 # MCP 端点挂载：必须在所有路由注册之后，"/" 挂载作为兜底，仅接住 /mcp

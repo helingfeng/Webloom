@@ -66,35 +66,18 @@ async def run_flow_endpoint(
     flow_id: int, request: FlowRunRequest, db: AsyncSession = Depends(get_db)
 ) -> Any:
     flow = await _get_flow_or_404(db, flow_id)
-    global_inputs = request.global_inputs or {}
-
-    execution = Execution(
-        target_type="flow",
-        target_id=flow.id,
-        mode=request.mode,
-        inputs=global_inputs,
-        status="running",
-        logs="",
-        outputs={},
-        started_at=datetime.now(),
-    )
-    db.add(execution)
-    await db.commit()
-    await db.refresh(execution)
-
-    async def _run_task():
-        async with AsyncSessionLocal() as session:
-            task_flow = await flow_service.get_flow(session, flow_id)
-            if not task_flow:
-                raise ValueError(f"Flow {flow_id} not found")
-            await flow_service.execute_flow(
-                session, task_flow, request.mode, global_inputs, execution.id
-            )
-
-    asyncio.create_task(_run_task())
+    try:
+        execution = await flow_service.start_flow_execution(
+            db, flow, mode=request.mode, global_inputs=request.global_inputs or {}
+        )
+    except QueueUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="执行队列不可用：请确认 Redis 与执行 worker（arq）已启动",
+        )
     return {
         "execution_id": execution.id,
-        "status": "running",
+        "status": execution.status,
         "outputs": {},
         "logs": "",
     }

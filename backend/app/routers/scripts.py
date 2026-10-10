@@ -13,6 +13,7 @@ from app.schemas.script import (
 )
 from app.services import script_service
 from app.services.script_run_service import start_script_execution
+from app.task_queue import QueueUnavailableError
 
 router = APIRouter()
 
@@ -84,16 +85,22 @@ async def run_script_endpoint(
     script_id: int, request: ScriptRunRequest, db: AsyncSession = Depends(get_db)
 ) -> Any:
     script = await _get_script_or_404(db, script_id)
-    execution = await start_script_execution(
-        db,
-        script,
-        mode=request.mode or script.run_mode,
-        inputs=request.inputs or {},
-        headless=script.headless if request.headless is None else request.headless,
-    )
+    try:
+        execution = await start_script_execution(
+            db,
+            script,
+            mode=request.mode or script.run_mode,
+            inputs=request.inputs or {},
+            headless=script.headless if request.headless is None else request.headless,
+        )
+    except QueueUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="执行队列不可用：请确认 Redis 与执行 worker（arq）已启动",
+        )
     return {
         "execution_id": execution.id,
-        "status": "running",
+        "status": execution.status,
         "outputs": {},
         "logs": "",
     }

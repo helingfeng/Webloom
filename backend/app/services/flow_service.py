@@ -3,14 +3,19 @@ from collections import deque
 from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import AsyncSessionLocal
 from app.models.flow import Flow
 from app.models.execution import Execution
 from app.schemas.flow import FlowCreate, FlowUpdate
 from app.services.script_service import get_script
 from app.services import global_variable_service, data_view_service, workspace_service
-from app.engine.runner import execute_script_code
+from app.engine.runner import cleanup_execution_temp_files, execute_script_code
 from app.engine.mock_generator import generate_mock_inputs
-from app.websocket import manager
+from app.services.log_bus import ExecutionLogBus
+from app.task_queue import QueueUnavailableError, enqueue_flow_run
+
+# 流程内同时执行的节点上限（每节点一个 Chromium 实例；全局并发由 worker max_jobs 兜底）
+FLOW_NODE_CONCURRENCY = 3
 
 
 async def get_flows(
@@ -69,20 +74,23 @@ async def delete_flow(db: AsyncSession, flow: Flow) -> None:
     await db.commit()
 
 
-async def run_flow(
+async def start_flow_execution(
     db: AsyncSession,
     flow: Flow,
+    *,
     mode: str = "manual",
     global_inputs: dict | None = None,
 ) -> Execution:
-    global_inputs = global_inputs or {}
+    """创建 pending 状态 Execution 并入队，立即返回（worker 调度执行）。
 
+    队列不可用（Redis 未启动）时抛 QueueUnavailableError，该执行留痕为 failed。
+    """
     execution = Execution(
         target_type="flow",
         target_id=flow.id,
         mode=mode,
-        inputs=global_inputs,
-        status="running",
+        inputs=global_inputs or {},
+        status="pending",
         logs="",
         outputs={},
         started_at=datetime.now(),
@@ -91,8 +99,64 @@ async def run_flow(
     await db.commit()
     await db.refresh(execution)
 
-    await execute_flow(db, flow, mode, global_inputs, execution.id)
+    try:
+        await enqueue_flow_run(execution.id)
+    except QueueUnavailableError:
+        execution.status = "failed"
+        execution.logs = "Error: 执行队列不可用，请确认 Redis 与执行 worker 已启动\n"
+        execution.finished_at = datetime.now()
+        await db.commit()
+        raise
     return execution
+
+
+async def run_flow_execution(execution_id: int) -> dict:
+    """worker job：执行流程并回写终态。幂等：非 pending 状态直接返回。"""
+    async with AsyncSessionLocal() as session:
+        execution = await session.get(Execution, execution_id)
+        if execution is None or execution.status != "pending":
+            return {"status": execution.status if execution else "missing"}
+
+        flow = await get_flow(session, execution.target_id)
+
+        bus = ExecutionLogBus(execution_id)
+        await bus.start()
+
+        def log_callback(msg: str):
+            bus.append(msg)
+
+        try:
+            execution.status = "running"
+            execution.started_at = datetime.now()
+            await session.commit()
+
+            if flow is None:
+                raise ValueError(f"流程 {execution.target_id} 不存在（可能已被删除）")
+
+            await execute_flow(
+                session,
+                flow,
+                execution.mode,
+                execution.inputs or {},
+                execution_id,
+                log_callback,
+            )
+        except asyncio.CancelledError:
+            # worker 超时/关闭取消：落终态 failed，而不是留 running 僵尸记录
+            bus.append("Error: 流程执行被取消（worker 超时或关闭）\n")
+            execution.status = "failed"
+            execution.outputs = {}
+        except Exception as exc:
+            bus.append(f"Error: {exc}\n")
+            execution.status = "failed"
+            execution.outputs = {}
+        finally:
+            execution.finished_at = datetime.now()
+            await bus.finalize()  # 最后一次增量落库（终态 commit 之前）
+            await session.commit()
+            await bus.close(publish_eof=True)  # EOF 在终态落库后发布
+            cleanup_execution_temp_files(execution_id)
+        return {"status": execution.status}
 
 
 async def execute_flow(
@@ -103,13 +167,14 @@ async def execute_flow(
     execution_id: int,
     log_callback=None,
 ) -> None:
+    """执行流程节点（供 worker job 调用）；终态回写由调用方统一处理日志与状态。"""
     nodes = flow.nodes or []
     edges = flow.edges or []
 
     if log_callback is None:
 
         def log_callback(msg: str):
-            asyncio.create_task(manager.send_log(execution_id, msg))
+            pass
 
     execution = await db.get(Execution, execution_id)
     if not execution:
@@ -121,20 +186,14 @@ async def execute_flow(
         )
         execution.status = "success"
         execution.outputs = context
-        execution.logs = "Flow executed successfully"
+        # 节点日志已由 LogBus 增量落库，不再整体覆写 logs
     except Exception as exc:
         execution.status = "failed"
-        detail_logs = getattr(exc, "logs", "") or ""
-        error_msg = f"Error: {exc}"
-        execution.logs = (
-            f"{detail_logs}\n{error_msg}".strip() if detail_logs else error_msg
-        )
         execution.outputs = {}
-        log_callback(f"{error_msg}\n")
+        log_callback(f"Error: {exc}\n")
     finally:
         execution.finished_at = datetime.now()
         await db.commit()
-        await db.refresh(execution)
 
 
 async def _run_flow_nodes(
@@ -146,8 +205,8 @@ async def _run_flow_nodes(
     execution_id: int,
     log_callback,
 ) -> dict:
-    script_nodes = [n for n in nodes if n.get("type") == "script"]
-    ordered_node_ids = _topological_sort(nodes, edges)
+    script_nodes = {n["id"]: n for n in nodes if n.get("type") == "script"}
+    layers = _topological_layers(nodes, edges)
 
     context = {"global": global_inputs, "nodes": {}}
 
@@ -157,59 +216,87 @@ async def _run_flow_nodes(
     async def _load_globals(start_url: str) -> tuple[dict, dict, dict, list]:
         key = start_url or ""
         if key not in global_cache:
-            global_cache[key] = (
-                await global_variable_service.get_active_headers(db, key),
-                await global_variable_service.get_active_vars(db, key),
-                await global_variable_service.get_active_local_storage(db, key),
-                await global_variable_service.get_active_cookies(db, key),
+            global_cache[key] = await global_variable_service.get_active_globals_grouped(
+                db, key
             )
         return global_cache[key]
 
-    for node_id in ordered_node_ids:
-        node = next((n for n in script_nodes if n["id"] == node_id), None)
-        if not node:
-            continue
+    # 数据视图整次执行预取一次（所有节点共享同份数据，带 TTL 缓存去重并发执行）
+    data_views: dict = {}
+    if script_nodes:
+        data_views = await data_view_service.collect_view_data_cached(db)
+    context["data_views"] = data_views
 
-        script_id = node.get("data", {}).get("script_id")
-        if not script_id:
-            continue
+    sem = asyncio.Semaphore(FLOW_NODE_CONCURRENCY)
 
-        script = await get_script(db, script_id)
-        if not script:
-            raise ValueError(f"Script {script_id} not found")
+    for layer in layers:
+        # 先串行完成每节点的会话操作（查脚本/全局变量/解析输入），
+        # 再并行执行子进程部分（AsyncSession 不允许并发使用）
+        tasks = []
+        for node_id in layer:
+            node = script_nodes.get(node_id)
+            if not node:
+                continue
+            script_id = node.get("data", {}).get("script_id")
+            if not script_id:
+                continue
 
-        if script.inherit_global:
-            headers, gvars, local_storage, cookies = await _load_globals(script.start_url or "")
-        else:
-            headers, gvars, local_storage, cookies = {}, {}, {}, []
+            script = await get_script(db, script_id)
+            if not script:
+                raise ValueError(f"Script {script_id} not found")
 
-        input_mapping = node.get("data", {}).get("input_mapping", {})
-        inputs = _resolve_inputs(script.inputs, input_mapping, context, mode)
+            if script.inherit_global:
+                headers, gvars, local_storage, cookies = await _load_globals(
+                    script.start_url or ""
+                )
+            else:
+                headers, gvars, local_storage, cookies = {}, {}, {}, []
 
-        # 数据视图按次执行预取一次（所有节点共享同份数据）
-        if "data_views" not in context:
-            context["data_views"] = await data_view_service.collect_view_data(db)
+            input_mapping = node.get("data", {}).get("input_mapping", {})
+            inputs = _resolve_inputs(script.inputs, input_mapping, context, mode)
 
-        log_callback(f"[node {node_id}] Running script {script.name}\n")
-        logs, outputs = await execute_script_code(
-            script,
-            inputs,
-            execution_id,
-            log_callback,
-            global_headers=headers,
-            global_vars=gvars,
-            global_local_storage=local_storage,
-            global_cookies=cookies,
-            data_views=context["data_views"],
-        )
-        log_callback(f"[node {node_id}] Done\n")
+            async def _run_node(
+                script=script,
+                inputs=inputs,
+                headers=headers,
+                gvars=gvars,
+                local_storage=local_storage,
+                cookies=cookies,
+                node_id=node_id,
+            ):
+                def node_log(msg: str):
+                    log_callback(f"[node {node_id}] {msg}")
 
-        context["nodes"][node_id] = outputs or {}
+                node_log(f"Running script {script.name}\n")
+                async with sem:
+                    _, outputs = await execute_script_code(
+                        script,
+                        inputs,
+                        execution_id,
+                        node_log,
+                        global_headers=headers,
+                        global_vars=gvars,
+                        global_local_storage=local_storage,
+                        global_cookies=cookies,
+                        data_views=data_views,
+                    )
+                node_log("Done\n")
+                context["nodes"][node_id] = outputs or {}
+
+            tasks.append(_run_node())
+
+        if tasks:
+            # return_exceptions：避免取消同层兄弟节点导致 chromium 子进程变孤儿
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, Exception):
+                    raise r
 
     return context
 
 
-def _topological_sort(nodes: list[dict], edges: list[dict]) -> list[str]:
+def _topological_layers(nodes: list[dict], edges: list[dict]) -> list[list[str]]:
+    """Kahn 分层拓扑排序：同层节点无依赖可并行；存在环时抛 ValueError（不再静默跳过）"""
     node_ids = {n["id"] for n in nodes}
     adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
     in_degree: dict[str, int] = {node_id: 0 for node_id in node_ids}
@@ -221,18 +308,25 @@ def _topological_sort(nodes: list[dict], edges: list[dict]) -> list[str]:
             adjacency[source].append(target)
             in_degree[target] += 1
 
-    queue = deque([node_id for node_id in node_ids if in_degree[node_id] == 0])
-    result: list[str] = []
+    queue = deque(sorted(node_id for node_id in node_ids if in_degree[node_id] == 0))
+    layers: list[list[str]] = []
+    visited = 0
 
     while queue:
-        current = queue.popleft()
-        result.append(current)
-        for neighbor in adjacency[current]:
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
+        layer = sorted(queue)
+        queue = deque()
+        visited += len(layer)
+        layers.append(layer)
+        for current in layer:
+            for neighbor in adjacency[current]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
 
-    return result
+    if visited < len(node_ids):
+        cyclic = sorted(node_id for node_id in node_ids if in_degree[node_id] > 0)
+        raise ValueError(f"流程存在环依赖，无法执行，涉及节点: {', '.join(cyclic)}")
+    return layers
 
 
 def _resolve_inputs(

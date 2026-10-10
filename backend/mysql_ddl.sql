@@ -92,6 +92,52 @@ CREATE TABLE `modules`
     KEY `ix_modules_requirement_id` (`requirement_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='模块表（需求下的功能模块）';
 
+CREATE TABLE `open_api_logs`
+(
+    `id`            bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `app_id`        bigint unsigned      NULL COMMENT '应用 ID（认证失败为空）',
+    `app_key`       varchar(64)          NOT NULL DEFAULT '' COMMENT '调用方 App Key',
+    `path`          varchar(255)         NOT NULL DEFAULT '' COMMENT '请求路径',
+    `method`        varchar(10)          NOT NULL DEFAULT '' COMMENT 'HTTP 方法',
+    `status_code`   int                  NOT NULL DEFAULT 0 COMMENT '响应状态码',
+    `success`       tinyint(1) unsigned  NOT NULL DEFAULT '1' COMMENT '是否成功：1-成功/0-失败',
+    `execution_id`  bigint unsigned      NULL COMMENT '关联执行 ID（采集触发）',
+    `request_ip`    varchar(64)          NOT NULL DEFAULT '' COMMENT '调用方 IP',
+    `detail`        text                 NOT NULL COMMENT '摘要/失败原因',
+    `created_at`    datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `ix_open_api_logs_app_id` (`app_id`) USING BTREE,
+    KEY `ix_open_api_logs_execution_id` (`execution_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='开放接口调用日志表（含认证失败记录）';
+
+CREATE TABLE `open_apis`
+(
+    `id`           bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `name`         varchar(255)         NOT NULL COMMENT '接口名称',
+    `method`       varchar(10)          NOT NULL DEFAULT 'GET' COMMENT 'HTTP 方法：GET/POST/PUT/DELETE/PATCH',
+    `path`         varchar(255)         NOT NULL COMMENT '外部调用路径（相对 /open，支持 {param}）',
+    `target_path`  varchar(255)         NOT NULL COMMENT '内部目标路径（以 /api/ 开头）',
+    `enabled`      tinyint(1) unsigned  NOT NULL DEFAULT '1' COMMENT '是否启用：1-启用/0-停用',
+    `description`  text                 NOT NULL COMMENT '描述',
+    `created_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='开放接口表（代理规则：外部路径 → 平台内部 /api 接口）';
+
+CREATE TABLE `open_apps`
+(
+    `id`           bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `name`         varchar(255)         NOT NULL COMMENT '应用名称',
+    `app_key`      varchar(64)          NOT NULL COMMENT '开放应用 App Key（调用方标识）',
+    `app_secret`   varchar(128)         NOT NULL COMMENT 'App Secret（签名密钥）',
+    `enabled`      tinyint(1) unsigned  NOT NULL DEFAULT '1' COMMENT '是否启用：1-启用/0-停用',
+    `description`  text                 NOT NULL COMMENT '描述',
+    `created_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ix_open_apps_app_key` (`app_key`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='开放平台应用表（App Key + Secret 凭证）';
+
 CREATE TABLE `query_history`
 (
     `id`              bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',

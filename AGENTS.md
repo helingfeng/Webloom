@@ -21,17 +21,26 @@
 
 - **脚本执行约定**：用户代码片段在模板内可使用 `INPUTS`、`OUTPUTS`、`GLOBAL_HEADERS`、`GLOBAL_VARS`、`GLOBAL_LOCAL_STORAGE`、`DATA_VIEWS` / `DATA_VIEWS_ONE` 与 `page/context/browser`。结果通过 stdout 中 `__ATP_OUTPUTS__{json}` 标记回传解析。参数经环境变量（`ATP_INPUTS` 等）传入子进程，且必须设置 `PYTHONUNBUFFERED=1`（否则日志会缓冲到结束才输出）。输入变量类型除 string/number/boolean/secret 外支持 `header`/`cookie`/`localStorage`（变量名即注入名，Cookie 域取起始 URL host），执行时与全局变量合并且**输入变量优先**（覆盖同名项，拆分逻辑在 `runner.py::_split_browser_inputs`）。
 - **全局变量三种类型**：`header`（注入浏览器 `extra_http_headers`）、`localStorage`（执行前访问起始 URL 自动写入）、`variable`（注入 `GLOBAL_VARS`），另有 cookie 支持；按域名匹配（精确或子域名，未绑定域名的全局生效）。脚本通过 `Script.inherit_global`（默认 true）控制是否继承。
-- **异步执行模式**：run 接口先创建 `running` 状态的 Execution 并立即响应，实际执行放在 `asyncio.create_task` 中并用独立的 `AsyncSessionLocal` 会话，避免阻塞请求。
-- **流程执行**：`flow_service._run_flow_nodes` 按拓扑排序执行脚本节点，节点间通过 `{{global.xxx}}`、`{{node_xxx.xxx}}` 模板语法传递变量。
+- **队列执行模式（Redis + arq worker）**：API 进程只创建 `pending` 状态 Execution 并经 `task_queue.enqueue_*` 入队（`_job_id = exec:{execution_id}` 幂等防重），实际执行在独立 worker 进程（`app/worker.py`）。Redis 不可用时 run 接口返回 503、该执行留痕 failed。worker `max_jobs` = `max_concurrent_executions`（默认 5）；`job_timeout` = `script_execution_timeout + 30`。恢复机制：worker 启动时把 `running` 执行标为 failed（worker 重启中断）并清理残留 job 键；心跳循环每 10s 兜底把超龄（>60s）`pending` 重新入队（Redis 重启丢队列后自愈，`_job_id` 去重不会重复执行）。worker 无 `--reload`，改后端代码需手动重启；**单机只跑一个 worker**（多个会误触发恢复逻辑）。
+- **日志流（LogBus）**：worker 内 `services/log_bus.py::ExecutionLogBus` 每行分配递增 seq（1 seq = 1 行，行尾强制 `\n`），经 Redis pub/sub（channel `exec:logs:{id}`，内部 JSON 含 seq/eof 控制消息）实时分发 + 每 1s 增量 `CONCAT` 落库 `executions.logs`（Text 64KB 超限时自动停落库，实时流不受影响）。API 进程 `services/log_stream_service.py` 先订阅再从 DB 重放、seq 对齐去重补洞，EOF（终态落库后发布）触发收尾；Redis 不可用自动退化为 DB 轮询。对前端 WS 消息保持纯文本日志行。
+- **流程执行**：`flow_service._run_flow_nodes` 按 `_topological_layers` 分层拓扑排序（**有环抛 ValueError**，不再静默跳过），同层节点 `asyncio.gather` 并行执行（上限 `FLOW_NODE_CONCURRENCY=3`），节点间通过 `{{global.xxx}}`、`{{node_xxx.xxx}}` 模板语法传递变量；节点日志带 `[node <id>]` 前缀。会话相关操作（查脚本/全局变量/解析输入）在每层开始前串行完成（AsyncSession 不允许并发使用），仅子进程执行并行。
 - **MySQL 迁移**：无 Alembic。`database.py` 的 `init_db()` 在 `create_all` 后对已有表做幂等 `ALTER TABLE ... ADD COLUMN`（`_migrate` 内先 `inspect` 检查列是否存在）。新建表无需迁移，仅给已有表加列时写 ALTER 块。主库为 MySQL，`_migrate` 裸 SQL 必须双方言兼容：标识符统一反引号（`usage`/`key`/`database` 等为 MySQL 保留字），索引用 `inspector.get_indexes()` 判断后再 `CREATE INDEX`（MySQL 不支持 `IF NOT EXISTS`）。建表 DDL 由 `backend/scripts/gen_mysql_ddl.py` 从模型生成到 `backend/mysql_ddl.sql`（改模型后必须重新生成；模型列须带 `comment`，主键/ID 列用 `BigIntUnsigned`）。
 - **测试用例组织**：项目空间（workspaces）→ 需求（requirements）→ 模块（modules）三级，用例挂模块下。
+
+### 开放平台
+
+- **模型与凭证**：`models/open_platform.py` 三表——`open_apps`（App Key `fk*` 唯一 + Secret，Secret 明文存但**列表接口不回传**，仅创建/详情/重新生成返回）、`open_apis`（代理规则：外部路径 → 内部 `/api/` 路径，`(method, path)` 唯一）、`open_api_logs`（每次开放调用留痕，含认证失败；`execution_id` 关联采集触发）。
+- **签名认证**（`open_app_service.authenticate_request`）：头 `X-App-Key` / `X-Timestamp` / `X-Sign`；`X-Sign = HMAC-SHA256(secret, "{METHOD}\n{完整路径含/open}\n{timestamp}\n{sha256_hex(body)}")` 小写 hex；时间窗 `open_api_sign_ttl_seconds`（±300s）；恒时比较；签名只覆盖 path **不含 query**。认证失败也落日志。
+- **内置采集接口**（`/open/api/v1/collect/*`，固定开放）：`POST trigger`（传 `url` + `script_id`，url 强制合入 `inputs.url`，复用 `start_script_execution` 入队，QueueUnavailable → 503）；`GET result?execution_id=`（**归属校验**：只能查本应用触发的执行，从 `open_api_logs` 反查）；`GET tasks`（本应用最近触发任务，最多 50 条）。
+- **代理转发**（`open_api_service`）：`{param}` 路径模板经正则匹配替换到 target_path；httpx AsyncClient 转发到 `open_api_internal_base_url`（默认 `http://127.0.0.1:8000`，lifespan 关闭），透传 body/query，**target 必须以 /api/ 开头**（service 层校验，防指向外部）；catch-all 路由必须注册在内置路由之后。
+- **管理端与前端**：`routers/open_platform.py` 导出 4 个 router（挂 `/api/open-apps`、`/api/open-apis`、`/api/open-logs`、`/open`）；前端菜单组「开放平台」4 页（开放应用/开放接口/调用日志/接入文档），AppLayout 的 menuItems 用 `children` + `el-sub-menu` 渲染分组。
 
 ### 数据源与数据视图
 
 - **连接池**：`datasource_query_service.connection_manager` 按 `(datasource_id, database)` 缓存 `AsyncEngine`；`invalidate(ds_id)` 释放该数据源全部库的 engine（配置变更/超时/连接异常后调用）；应用退出 `dispose_all`。
 - **多库切换**：`list_tables` / `get_table_schema` / `execute_query` / `execute_readonly_query` 均接受可选 `database`，缺省回退数据源默认库（`effective = database or ds.database`）。`list_databases` 过滤 4 个系统库。
 - **SQL 执行安全**：`_preprocess` 剥离注释后校验单语句；`_classify` 按首 token 白名单分流查询/执行路径；查询路径 `fetchmany` 截断 `settings.sql_max_rows`（1000）行；无绑定参数时字面 `%` 必须转义为 `%%`（aiomysql pyformat）。`validate_readonly_sql` 是数据视图与 MCP 只读查询共用的双保险之一。
-- **数据视图**：数据源 + 只读 SQL，保存后外部系统通过 `GET /api/data/{slug}` 无鉴权取 JSON（`public_router`，手动加 CORS 头）；停用视图对外表现为不存在。脚本执行前预取所有启用视图注入 `DATA_VIEWS`（经 `ATP_DATA_VIEWS` 环境变量），单视图失败值为 `{"_error": ...}` 不影响脚本。
+- **数据视图**：数据源 + 只读 SQL，保存后外部系统通过 `GET /api/data/{slug}` 无鉴权取 JSON（`public_router`，手动加 CORS 头）；停用视图对外表现为不存在。脚本/流程执行前预取所有启用视图注入 `DATA_VIEWS`（经 `ATP_DATA_VIEWS` 环境变量），单视图失败值为 `{"_error": ...}` 不影响脚本。预取用 `collect_view_data_cached`：视图 SQL 并行执行（`VIEW_CONCURRENCY=4`）+ worker 侧 TTL 缓存（`cache_ttl_seconds` 默认 30s，键含 `updated_at`，编辑即失效；并发共享同一次查询；失败不缓存）。管理端预览与公开取数不走缓存。
 - **SQL 执行历史**：工作台执行（含失败）自动落 `query_history` 表，结果快照仅保留前 200 行样本；删除数据源时级联清理。落历史失败静默回滚，不影响执行响应。
 
 ### MCP 服务
@@ -42,7 +51,13 @@
 
 ## 2. 构建与命令
 
-### 后端（端口 8000）
+### 基础设施（先于后端启动）
+
+```bash
+redis-server --port 6390 --daemonize yes --save '' --appendonly no   # 执行队列（.env 的 REDIS_URL 指向 6390；本机 6379 被其他带密码 Redis 占用）
+```
+
+### 后端 API（端口 8000）
 
 ```bash
 cd backend
@@ -51,6 +66,16 @@ uvicorn app.main:app --reload --port 8000   # 开发
 pip install -r requirements.txt
 playwright install chromium                  # 首次需要
 ```
+
+### 执行 worker（独立进程，必启动）
+
+```bash
+cd backend && ./venv/bin/python3 -m app.worker   # 无 --reload，改代码需手动重启；单机只能跑一个
+```
+
+入口 `worker.py::_supervise` 带断线守护：Redis 瞬断/重启导致 arq 主循环退出时自动重启（也可直接 `arq app.worker.WorkerSettings`，但无自动重启）。
+
+不启动 worker 时任务会停留在队列（run 接口正常返回 pending），`/api/health` 的 `queue.worker_alive=false` 可诊断。
 
 ### 前端（端口 5173）
 
@@ -65,9 +90,9 @@ npm run test:unit  # vitest
 
 ### 注意事项
 
-- 临时执行脚本写入系统临时目录（`config.py` 的 `executions_dir` 指向 `tempfile.gettempdir()/atp_executions`）。**不要**改回 `backend/storage/`，否则 uvicorn `--reload` 会监听到运行文件导致服务自动重启、中断 WebSocket。
+- 临时执行脚本写入系统临时目录（`config.py` 的 `executions_dir` 指向 `tempfile.gettempdir()/atp_executions`）。**不要**改回 `backend/storage/`，否则 uvicorn `--reload` 会监听到运行文件导致服务自动重启、中断 WebSocket。运行文件带随机后缀（流程并行节点互不覆写）并在执行后即删（`runner.py` finally + `cleanup_execution_temp_files`），worker 启动时清扫超 24h 的孤儿文件。
 - 端口被占用或进程挂死：`lsof -ti:8000 | xargs kill -9` 后重启。
-- 验证后端是否正常：`curl http://127.0.0.1:8000/api/health`。
+- 验证后端是否正常：`curl http://127.0.0.1:8000/api/health`（响应含 `queue` 字段：available/depth/worker_alive）。
 - 不要在 `--reload` 进程外另跑连同一 MySQL 的一次性 asyncio 脚本做验证后遗留连接，异常退出可能拖垮开发服务器。
 
 ## 3. 代码风格
@@ -98,7 +123,7 @@ npm run test:unit  # vitest
 
 ## 6. 配置
 
-- 后端配置集中在 `backend/app/config.py`（pydantic-settings），支持 `backend/.env` 覆盖（样例见 `.env.example`）。关键项：`headless`（浏览器是否无头）、`playwright_timeout`、`script_execution_timeout`、`sql_query_timeout`（30s）、`sql_max_rows`（1000）、`database_url`（MySQL DSN，默认 `mysql+aiomysql://root:helingfeng@127.0.0.1:3306/fishcode?charset=utf8mb4`，表级字符集 utf8mb4；注意 URL 驱动后缀必须是 `+aiomysql`，裸 `mysql://` 会去加载未安装的 MySQLdb）。
+- 后端配置集中在 `backend/app/config.py`（pydantic-settings），支持 `backend/.env` 覆盖（样例见 `.env.example`）。关键项：`headless`（浏览器是否无头）、`playwright_timeout`、`script_execution_timeout`、`sql_query_timeout`（30s）、`sql_max_rows`（1000）、`database_url`（MySQL DSN，默认 `mysql+aiomysql://root:helingfeng@127.0.0.1:3306/fishcode?charset=utf8mb4`，表级字符集 utf8mb4；注意 URL 驱动后缀必须是 `+aiomysql`，裸 `mysql://` 会去加载未安装的 MySQLdb）；执行队列：`redis_url`（默认 `redis://127.0.0.1:6379/0`，本机 `.env` 覆盖为 6390 独立实例）、`max_concurrent_executions`（默认 5）；数据采集：`cache_ttl_seconds`（30s）、`datasource_pool_size`/`datasource_max_overflow`（5/10）、`database_pool_size`/`database_max_overflow`（20/40，主库连接池仅 MySQL 方言生效）。
 - 平台主库为 MySQL（`fishcode`）：建表 DDL 在 `backend/mysql_ddl.sql`；SQLite 存量数据经 `backend/scripts/migrate_sqlite_to_mysql.py` 一次性迁入（MySQL 侧已有数据的表自动跳过）。`backend/storage/app.db` 为历史 SQLite 存量，不再被服务读写。引擎已带 `pool_pre_ping`/`pool_recycle=3600` 防 MySQL 长连接被 `wait_timeout` 掐断。
 - 前端 Vite 代理配置在 `frontend/vite.config.ts`：`/api` 代理需带 `ws: true`（WebSocket 日志推送依赖）。
 - 数据库/存储均在 `backend/storage/`（历史 app.db、scripts/）；`app/skills/` 目录预留存放 Skill 模板 JSON；`app/agent_skills/` 存放 MCP 配套 Agent Skills 文档。
