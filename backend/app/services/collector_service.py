@@ -14,6 +14,7 @@ from app.schemas.collector import CollectorCreate, CollectorRun
 from app.services import script_service
 from app.services.script_run_service import start_script_execution
 from app.engine.runner import validate_script_code, _extract_error_line
+from app.engine.parameters import resolve_inputs, normalize_definitions
 
 
 class CollectorError(ValueError):
@@ -134,7 +135,7 @@ async def contract(db, collector):
     script = await script_service.get_script(db, collector.script_id)
     if not script:
         raise CollectorError("关联脚本已删除，请联系接口发布者", 409)
-    schema = input_schema(script.inputs)
+    schema = input_schema(normalize_definitions(script.inputs or []))
     example = {
         k: v.get(
             "default",
@@ -166,37 +167,10 @@ async def contract(db, collector):
 
 
 def validate_inputs(script, inputs):
-    definitions = {d["name"]: d for d in script.inputs or []}
-    unknown = set(inputs) - definitions.keys()
-    if unknown:
-        raise CollectorError("未声明的输入参数: " + ", ".join(sorted(unknown)))
-    merged = {
-        d["name"]: d["default"]
-        for d in definitions.values()
-        if d.get("default") is not None
-    }
-    merged.update(inputs)
-    for name, d in definitions.items():
-        value = merged.get(name)
-        if value is None:
-            if d.get("required", True):
-                raise CollectorError(f"缺少必填参数: {name}")
-            continue
-        if d.get("required", True) and isinstance(value, str) and not value.strip():
-            raise CollectorError(f"必填参数 {name} 不能为空")
-        kind = d.get("type", "string")
-        valid = (
-            isinstance(value, bool)
-            if kind == "boolean"
-            else (
-                isinstance(value, (int, float)) and not isinstance(value, bool)
-                if kind == "number"
-                else isinstance(value, str)
-            )
-        )
-        if not valid:
-            raise CollectorError(f"参数 {name} 类型应为 {kind}")
-    return merged
+    try:
+        return resolve_inputs(script.inputs or [], inputs)
+    except ValueError as exc:
+        raise CollectorError(str(exc)) from exc
 
 
 async def submit(db, collector, app_id, payload: CollectorRun, request_key=None):
@@ -307,9 +281,14 @@ async def task_detail(
     if include_logs:
         result["logs"] = (execution.logs or "")[-20000:]
         script = await script_service.get_script(db, collector.script_id)
+        definitions = (
+            execution.script_snapshot.get("inputs", [])
+            if execution.script_snapshot
+            else (script.inputs if script else [])
+        )
         hidden = {
             d["name"]
-            for d in (script.inputs if script else [])
+            for d in definitions
             if d.get("type") in ("secret", "cookie", "header", "localStorage")
         }
         result["inputs"] = {

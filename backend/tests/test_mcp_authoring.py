@@ -155,3 +155,44 @@ async def test_mcp_save_and_retrieve(db_engine, monkeypatch):
     assert fetched["name"] == "目录"
     assert fetched["code"] == 'OUTPUTS["items"] = [1]'
     assert fetched["outputs"] == [{"name": "items", "description": ""}]
+
+
+async def test_real_runner_injects_storage_before_page_scripts_and_uses_input_url():
+    import uuid
+    from app.models.script import Script
+    from app.engine.runner import execute_script_code
+
+    script = Script(
+        start_url="https://old.test",
+        code="""async def handle(route):
+    OUTPUTS["authorization"] = route.request.headers.get("authorization")
+    await route.fulfill(content_type="text/html", body='<script>document.title = localStorage.getItem("token") || "missing"</script>')
+await context.route("**/*", handle)
+await page.goto(START_URL, wait_until="domcontentloaded")
+OUTPUTS["token"] = await page.title()
+OUTPUTS["url"] = START_URL
+OUTPUTS["cookies"] = await context.cookies(START_URL)""",
+        inputs=[
+            {"name": "url", "type": "string"},
+            {"name": "sid", "type": "cookie"},
+            {"name": "authorization", "type": "header"},
+        ],
+    )
+    _, outputs = await execute_script_code(
+        script,
+        {
+            "url": "https://new.test/page",
+            "sid": "input-cookie",
+            "authorization": "input-header",
+        },
+        -uuid.uuid4().int,
+        global_headers={"Authorization": "global-header"},
+        global_local_storage={"token": "first-load-token"},
+        headless=True,
+        capture_frames=False,
+    )
+    assert outputs["token"] == "first-load-token"
+    assert outputs["url"] == "https://new.test/page"
+    assert outputs["authorization"] == "input-header"
+    assert outputs["cookies"][0]["domain"] == "new.test"
+    assert outputs["cookies"][0]["value"] == "input-cookie"

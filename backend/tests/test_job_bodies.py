@@ -81,3 +81,59 @@ async def test_retired_execution_never_runs_script(sqlite_session_maker):
         execution = await session.get(Execution, eid)
         assert "已停用" in execution.logs
         assert execution.finished_at is not None
+
+
+async def test_queued_job_uses_submission_snapshot_and_effective_url(
+    sqlite_session_maker, monkeypatch
+):
+    from unittest.mock import AsyncMock
+    from app.models.script import Script
+    from app.schemas.script import ScriptUpdate
+    from app.services import script_service
+
+    monkeypatch.setattr(script_run_service, "enqueue_script_run", AsyncMock())
+    seen = {}
+
+    async def execute(script, inputs, *args, **kwargs):
+        seen.update(code=script.code, inputs=inputs, headless=kwargs["headless"])
+        return "", {"snapshot": True}
+
+    globals_mock = AsyncMock(return_value=({}, {}, {}, []))
+    monkeypatch.setattr(script_run_service, "execute_script_code", execute)
+    monkeypatch.setattr(
+        script_run_service.global_variable_service,
+        "get_active_globals_grouped",
+        globals_mock,
+    )
+    async with sqlite_session_maker() as db:
+        script = Script(
+            name="saved",
+            code='print("saved")',
+            workspace_id=1,
+            start_url="https://old.test",
+            inherit_global=True,
+            inputs=[
+                {"name": "url", "type": "string"},
+                {"name": "count", "type": "number", "default": "2"},
+            ],
+            outputs=[],
+        )
+        db.add(script)
+        await db.commit()
+        await db.refresh(script)
+        task = await script_run_service.start_script_execution(
+            db, script, inputs={"url": "https://new.test"}, headless=False
+        )
+        execution_id = task.id
+        script.code = 'print("changed after enqueue")'
+        script.start_url = "https://changed.test"
+        script.headless = True
+        await db.commit()
+    result = await script_run_service.run_script_execution(execution_id)
+    assert result["status"] == "success"
+    assert seen == {
+        "code": 'print("saved")',
+        "inputs": {"url": "https://new.test", "count": 2},
+        "headless": False,
+    }
+    assert globals_mock.call_args.args[1] == "https://new.test"

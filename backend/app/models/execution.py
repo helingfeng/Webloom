@@ -28,6 +28,9 @@ class Execution(Base):
     )
     logs: Mapped[str] = mapped_column(Text, default="", comment="完整日志")
     outputs: Mapped[dict] = mapped_column(JSON, default=dict, comment="输出结果 JSON")
+    script_snapshot: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, comment="提交时的脚本与运行配置快照，兼容历史执行为空"
+    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="开始时间"
     )

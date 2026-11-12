@@ -4,17 +4,14 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime
 from typing import Callable
 from urllib.parse import urlparse
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.script import Script
-from app.models.execution import Execution
 from app.config import settings
-from app.engine.mock_generator import generate_mock_inputs
+from app.engine.parameters import effective_start_url
 
 
-SCRIPT_TEMPLATE = '''import asyncio
+SCRIPT_TEMPLATE = """import asyncio
 import json
 import os
 from playwright.async_api import async_playwright, expect
@@ -74,20 +71,16 @@ async def main():
             except Exception as _e:
                 print("[live] Screencast unavailable: " + str(_e))
 
-        # 自动注入 localStorage 登录态（如已配置 localStorage 类型全局变量）
+        # 在首个业务页面脚本运行前注入，仅写入目标 origin，避免额外导航。
         if GLOBAL_LOCAL_STORAGE and START_URL:
-            print("[global] Injecting localStorage credentials into " + START_URL)
-            await page.goto(START_URL, wait_until="domcontentloaded")
-            await page.evaluate(
-                """(items) => {
-                    for (const [k, v] of Object.entries(items)) {
-                        localStorage.setItem(k, v);
-                    }
-                }""",
-                GLOBAL_LOCAL_STORAGE,
-            )
-            print("[global] localStorage injected, reloading...")
-            await page.goto(START_URL, wait_until="domcontentloaded")
+            from urllib.parse import urlparse
+            _url = urlparse(START_URL)
+            if _url.scheme in ("http", "https") and _url.netloc:
+                _origin = _url.scheme + "://" + _url.netloc
+                await context.add_init_script(
+                    "if (location.origin === " + json.dumps(_origin) + ") {"
+                    "for (const [k,v] of Object.entries(" + json.dumps(GLOBAL_LOCAL_STORAGE) + ")) localStorage.setItem(k,v); }"
+                )
 
 __USER_CODE__
 
@@ -96,7 +89,7 @@ __USER_CODE__
 if __name__ == "__main__":
     asyncio.run(main())
     print("__ATP_OUTPUTS__" + json.dumps(OUTPUTS))
-'''
+"""
 
 
 def render_script_code(code: str, headless: bool = True) -> str:
@@ -170,55 +163,6 @@ def _split_browser_inputs(
     return headers, local_storage, cookies
 
 
-async def run_script(
-    db: AsyncSession,
-    script: Script,
-    mode: str = "manual",
-    user_inputs: dict | None = None,
-    log_callback: Callable[[str], None] | None = None,
-) -> Execution:
-    user_inputs = user_inputs or {}
-    inputs = user_inputs if mode == "manual" else generate_mock_inputs(script.inputs)
-
-    execution = Execution(
-        target_type="script",
-        target_id=script.id,
-        mode=mode,
-        inputs=inputs,
-        status="running",
-        logs="",
-        outputs={},
-        started_at=datetime.now(),
-    )
-    db.add(execution)
-    await db.commit()
-    await db.refresh(execution)
-
-    try:
-        logs, outputs = await execute_script_code(
-            script, inputs, execution.id, log_callback
-        )
-        execution.status = "success"
-        execution.logs = logs
-        execution.outputs = outputs
-    except Exception as exc:
-        execution.status = "failed"
-        detail_logs = getattr(exc, "logs", "") or ""
-        error_msg = f"Error: {exc}"
-        execution.logs = (
-            f"{detail_logs}\n{error_msg}".strip() if detail_logs else error_msg
-        )
-        execution.outputs = {}
-        if log_callback:
-            log_callback(error_msg)
-    finally:
-        execution.finished_at = datetime.now()
-        await db.commit()
-        await db.refresh(execution)
-
-    return execution
-
-
 async def execute_script_code(
     script: Script,
     inputs: dict,
@@ -235,15 +179,20 @@ async def execute_script_code(
     # 未显式指定时回退到全局配置（默认无窗口）
     if headless is None:
         headless = settings.headless
-    timeout = settings.playwright_timeout
 
     # 输入变量中的 header/localStorage/cookie 注入浏览器，同名时覆盖全局变量（输入优先）
     input_headers, input_local_storage, input_cookies = _split_browser_inputs(
         script.inputs, inputs
     )
-    merged_headers = {**(global_headers or {}), **input_headers}
+    merged_headers = {
+        k: v
+        for k, v in (global_headers or {}).items()
+        if k.lower() not in {name.lower() for name in input_headers}
+    }
+    merged_headers.update(input_headers)
     merged_local_storage = {**(global_local_storage or {}), **input_local_storage}
-    cookie_host = urlparse(script.start_url or "").netloc.split(":")[0]
+    start_url = effective_start_url(script.start_url, inputs)
+    cookie_host = urlparse(start_url).hostname or ""
     if input_cookies and cookie_host:
         # cookie 域取起始 URL host（去端口）；与全局 cookie 同名时输入优先
         input_names = {c["name"] for c in input_cookies}
@@ -270,7 +219,7 @@ async def execute_script_code(
         "ATP_GLOBAL_LOCAL_STORAGE": json.dumps(merged_local_storage),
         "ATP_GLOBAL_COOKIES": json.dumps(merged_cookies),
         "ATP_DATA_VIEWS": json.dumps(data_views or {}),
-        "ATP_START_URL": script.start_url or "",
+        "ATP_START_URL": start_url,
         # 实时画面：模板内 CDP screencast 持续截帧写入该文件，供前端轮询展示
         "ATP_FRAME_FILE": (
             str(settings.executions_dir / f"frame_{execution_id}.jpg")

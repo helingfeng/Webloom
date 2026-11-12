@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class VariableDefinition(BaseModel):
     name: str
-    type: Literal["string", "number", "boolean", "secret", "header", "cookie", "localStorage"]
+    type: Literal[
+        "string", "number", "boolean", "secret", "header", "cookie", "localStorage"
+    ]
     description: str = ""
     default: Any = None
     required: bool = True
@@ -21,8 +23,8 @@ class ScriptBase(BaseModel):
     name: str
     description: str = ""
     start_url: str = ""
-    inputs: list[VariableDefinition] = []
-    outputs: list[OutputDefinition] = []
+    inputs: list[VariableDefinition] = Field(default_factory=list)
+    outputs: list[OutputDefinition] = Field(default_factory=list)
     code: str = ""
     inherit_global: bool = True
     run_mode: Literal["manual", "mock"] = "manual"
@@ -47,7 +49,7 @@ class ScriptOut(ScriptBase):
 
 class ScriptRunRequest(BaseModel):
     mode: Literal["manual", "mock"] | None = None
-    inputs: dict[str, Any] = {}
+    inputs: dict[str, Any] = Field(default_factory=dict)
     headless: bool | None = None
 
 

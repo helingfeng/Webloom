@@ -6,7 +6,7 @@ from app.database import Base, BigIntUnsigned
 
 class Script(Base):
     __tablename__ = "scripts"
-    __table_args__ = {"comment": "测试脚本表"}
+    __table_args__ = {"comment": "网页采集脚本表"}
 
     id: Mapped[int] = mapped_column(BigIntUnsigned, primary_key=True, comment="主键")
     # 逻辑归属 Workspace（无外键，空间删除前有服务层清空校验）

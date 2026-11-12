@@ -225,6 +225,8 @@ async def open_collect_trigger(
             inputs=inputs,
             headless=payload.get("headless"),
         )
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
     except QueueUnavailableError as exc:
         await open_api_service.record_open_log(
             db,

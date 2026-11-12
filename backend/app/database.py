@@ -66,6 +66,14 @@ async def init_db() -> None:
                             "ALTER TABLE `scripts` ADD COLUMN headless BOOLEAN DEFAULT 1"
                         )
                     )
+            if "executions" in inspector.get_table_names():
+                columns = {c["name"] for c in inspector.get_columns("executions")}
+                if "script_snapshot" not in columns:
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE `executions` ADD COLUMN `script_snapshot` JSON"
+                        )
+                    )
             if "collectors" in inspector.get_table_names():
                 columns = {c["name"] for c in inspector.get_columns("collectors")}
                 if "archived" not in columns:

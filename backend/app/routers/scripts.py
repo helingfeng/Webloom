@@ -92,7 +92,7 @@ async def run_script_endpoint(
         execution = await start_script_execution(
             db,
             script,
-            mode=request.mode or script.run_mode,
+            mode=request.mode or "manual",
             inputs=request.inputs or {},
             headless=script.headless if request.headless is None else request.headless,
         )

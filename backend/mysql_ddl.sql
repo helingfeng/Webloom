@@ -71,16 +71,17 @@ CREATE TABLE `datasources`
 
 CREATE TABLE `executions`
 (
-    `id`           bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `target_type`  varchar(20)      NOT NULL COMMENT '目标类型：script（兼容历史执行类型）',
-    `target_id`    bigint unsigned  NOT NULL COMMENT '目标 ID',
-    `mode`         varchar(20)      NOT NULL COMMENT '执行模式：manual-真实入参/mock-按输入定义生成 mock',
-    `inputs`       json             NOT NULL COMMENT '输入参数 JSON',
-    `status`       varchar(20)      NOT NULL DEFAULT 'pending' COMMENT '状态：pending/running/success/failed/timeout',
-    `logs`         text             NOT NULL COMMENT '完整日志',
-    `outputs`      json             NOT NULL COMMENT '输出结果 JSON',
-    `started_at`   datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '开始时间',
-    `finished_at`  datetime         NULL COMMENT '结束时间',
+    `id`               bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `target_type`      varchar(20)      NOT NULL COMMENT '目标类型：script（兼容历史执行类型）',
+    `target_id`        bigint unsigned  NOT NULL COMMENT '目标 ID',
+    `mode`             varchar(20)      NOT NULL COMMENT '执行模式：manual-真实入参/mock-按输入定义生成 mock',
+    `inputs`           json             NOT NULL COMMENT '输入参数 JSON',
+    `status`           varchar(20)      NOT NULL DEFAULT 'pending' COMMENT '状态：pending/running/success/failed/timeout',
+    `logs`             text             NOT NULL COMMENT '完整日志',
+    `outputs`          json             NOT NULL COMMENT '输出结果 JSON',
+    `script_snapshot`  json             NULL COMMENT '提交时的脚本与运行配置快照，兼容历史执行为空',
+    `started_at`       datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '开始时间',
+    `finished_at`      datetime         NULL COMMENT '结束时间',
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='脚本执行记录表';
 
@@ -88,8 +89,8 @@ CREATE TABLE `global_variables`
 (
     `id`           bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
     `name`         varchar(255)         NOT NULL COMMENT '变量名',
-    `value`        text                 NOT NULL COMMENT '变量值（前端列表打码显示）',
-    `type`         varchar(50)          NOT NULL DEFAULT 'header' COMMENT '类型：header/variable/localStorage/cookie',
+    `value`        text                 NOT NULL COMMENT '配置内容（列表接口不回传）',
+    `type`         varchar(50)          NOT NULL DEFAULT 'variable' COMMENT '类型：header/variable/localStorage/cookie',
     `domain`       varchar(255)         NOT NULL DEFAULT '' COMMENT '绑定域名（空为对全部域名生效）',
     `enabled`      tinyint(1) unsigned  NOT NULL DEFAULT '1' COMMENT '是否启用：1-启用/0-禁用',
     `description`  text                 NOT NULL COMMENT '备注',
@@ -167,7 +168,7 @@ CREATE TABLE `scripts`
     `updated_at`      datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `ix_scripts_workspace_id` (`workspace_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='测试脚本表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='网页采集脚本表';
 
 CREATE TABLE `skills`
 (

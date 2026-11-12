@@ -45,7 +45,7 @@ await page.locator("article").first.wait_for()
 OUTPUTS["items"] = await page.locator("article").evaluate_all("els => els.map(e => ({text:e.innerText.trim()}))")
 
 优先语义定位器和稳定属性；批量提取列表，分页/滚动设置最大页数或条数并去重，处理空列表，避免固定 sleep。iframe 用 frame_locator，详情链接先收集后访问。登录态默认按 start_url 域名从平台注入；不要求用户重复提供平台已配凭证。不得声称绕过验证码或访问权限，遇到登录失效应说明具体阻碍。
-inputs 定义 {name,type,description,default,required}，type 为 string/number/boolean/secret/header/cookie/localStorage；outputs 定义 {name,description}。输入名与 INPUTS key、输出名与 OUTPUTS key 一致。START_URL 来自保存的 start_url。默认值自动合并，显式输入优先。
+inputs 定义 {name,type,description,default,required}，type 为 string/number/boolean/secret/header/cookie/localStorage；outputs 定义 {name,description}。输入名与 INPUTS key、输出名与 OUTPUTS key 一致。START_URL 来自保存的 start_url。默认值自动合并，显式输入优先；数字与布尔值使用 JSON 原生类型，运行只接受已声明的参数。名为 url 的参数覆盖 START_URL 并用于选择域名登录态。
 """
 
 mcp = FastMCP("fishcode-scripts", instructions=INSTRUCTIONS)
@@ -220,7 +220,7 @@ async def run_script(
 ) -> dict:
     """异步运行脚本：任务提交执行队列后立即返回 execution_id（不等执行完成）。
     mode=manual 使用 inputs 实参；mode=mock 按定义自动生成 mock 输入；
-    不传 mode 时使用脚本保存的 run_mode，不传 headless 时使用脚本保存的 headless。
+    不传 mode 时使用真实输入运行（manual），mock 仅用于兼容旧客户端，不传 headless 时使用脚本保存的 headless。
     之后用 get_execution(execution_id) 轮询，建议间隔 3-5 秒。"""
     async with AsyncSessionLocal() as db:
         script = await script_service.get_script(db, script_id)
@@ -230,7 +230,7 @@ async def run_script(
             execution = await start_script_execution(
                 db,
                 script,
-                mode=mode or script.run_mode,
+                mode=mode or "manual",
                 inputs=inputs or {},
                 headless=script.headless if headless is None else headless,
             )
@@ -347,10 +347,22 @@ async def preview_script(
     inherit_global: bool = True,
 ) -> dict:
     """不保存草稿，直接用正式模板试跑代码，返回真实 outputs、日志及错误。
-    无需 Redis/worker；最多并发 2 次，超时同正式执行。input_definitions 可定义默认值及 cookie/header/localStorage 输入。
+    无需 Redis/worker；最多并发 2 次，超时同正式执行。input_definitions 可定义默认值及 cookie/header/localStorage 输入；未提供时按实参类型推断。
     不加载 DATA_VIEWS，依赖数据视图的脚本请保存后 run_script。成功且结果符合用户目标后 create_script 保存。
     浏览器独立于探索会话，代码必须包含完整导航与操作步骤。"""
     try:
+        if input_definitions is None:
+            input_definitions = [
+                VariableDefinition(
+                    name=name,
+                    type=(
+                        "boolean"
+                        if isinstance(value, bool)
+                        else "number" if isinstance(value, (int, float)) else "string"
+                    ),
+                )
+                for name, value in (inputs or {}).items()
+            ]
         payload = ScriptCreate(
             workspace_id=0,
             name="preview",

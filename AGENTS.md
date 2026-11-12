@@ -20,7 +20,7 @@
 ### 关键机制
 
 - **脚本执行约定**：用户代码片段在模板内可使用 `INPUTS`、`OUTPUTS`、`GLOBAL_HEADERS`、`GLOBAL_VARS`、`GLOBAL_LOCAL_STORAGE`、`DATA_VIEWS` / `DATA_VIEWS_ONE` 与 `page/context/browser`。结果通过 stdout 中 `__ATP_OUTPUTS__{json}` 标记回传解析。参数经环境变量（`ATP_INPUTS` 等）传入子进程，且必须设置 `PYTHONUNBUFFERED=1`（否则日志会缓冲到结束才输出）。输入变量类型除 string/number/boolean/secret 外支持 `header`/`cookie`/`localStorage`（变量名即注入名，Cookie 域取起始 URL host），执行时与全局变量合并且**输入变量优先**（覆盖同名项，拆分逻辑在 `runner.py::_split_browser_inputs`）。
-- **全局变量三种类型**：`header`（注入浏览器 `extra_http_headers`）、`localStorage`（执行前访问起始 URL 自动写入）、`variable`（注入 `GLOBAL_VARS`），另有 cookie 支持；按域名匹配（精确或子域名，未绑定域名的全局生效）。脚本通过 `Script.inherit_global`（默认 true）控制是否继承。
+- **全局变量三种类型**：`header`（注入浏览器 `extra_http_headers`）、`localStorage`（通过 init script 在目标页面脚本执行前写入）、`variable`（注入 `GLOBAL_VARS`），另有 cookie 支持；按域名匹配（精确或子域名，未绑定域名的全局生效）。脚本通过 `Script.inherit_global`（默认 true）控制是否继承。
 - **队列执行模式（Redis + arq worker）**：API 进程只创建 `pending` 状态 Execution 并经 `task_queue.enqueue_*` 入队（`_job_id = exec:{execution_id}` 幂等防重），实际执行在独立 worker 进程（`app/worker.py`）。Redis 不可用时 run 接口返回 503、该执行留痕 failed。worker `max_jobs` = `max_concurrent_executions`（默认 5）；`job_timeout` = `script_execution_timeout + 30`。恢复机制：worker 启动时把 `running` 执行标为 failed（worker 重启中断）并清理残留 job 键；心跳循环每 10s 兜底把超龄（>60s）`pending` 重新入队（Redis 重启丢队列后自愈，`_job_id` 去重不会重复执行）。worker 无 `--reload`，改后端代码需手动重启；**单机只跑一个 worker**（多个会误触发恢复逻辑）。
 - **日志流（LogBus）**：worker 内 `services/log_bus.py::ExecutionLogBus` 每行分配递增 seq（1 seq = 1 行，行尾强制 `\n`），经 Redis pub/sub（channel `exec:logs:{id}`，内部 JSON 含 seq/eof 控制消息）实时分发 + 每 1s 增量 `CONCAT` 落库 `executions.logs`（Text 64KB 超限时自动停落库，实时流不受影响）。API 进程 `services/log_stream_service.py` 先订阅再从 DB 重放、seq 对齐去重补洞，EOF（终态落库后发布）触发收尾；Redis 不可用自动退化为 DB 轮询。对前端 WS 消息保持纯文本日志行。
 - **MySQL 迁移**：无 Alembic。`database.py` 的 `init_db()` 在 `create_all` 后对已有表做幂等 `ALTER TABLE ... ADD COLUMN`（`_migrate` 内先 `inspect` 检查列是否存在）。新建表无需迁移，仅给已有表加列时写 ALTER 块。主库为 MySQL，`_migrate` 裸 SQL 必须双方言兼容：标识符统一反引号（`usage`/`key`/`database` 等为 MySQL 保留字），索引用 `inspector.get_indexes()` 判断后再 `CREATE INDEX`（MySQL 不支持 `IF NOT EXISTS`）。建表 DDL 由 `backend/scripts/gen_mysql_ddl.py` 从模型生成到 `backend/mysql_ddl.sql`（改模型后必须重新生成；模型列须带 `comment`，主键/ID 列用 `BigIntUnsigned`）。
@@ -141,7 +141,7 @@ npm run test:unit  # vitest
 - `services/collector_service.py` 统一发布、参数契约、幂等提交、查询与数据分页；路由位于 `routers/collectors.py`，管理端 `/api/collectors`、`/api/collector-tasks`，外部 `/open/v1/collectors`、`/open/v1/tasks`，通过开放 router 注册。
 - 外部支持 Bearer `AppKey.AppSecret` 与原 HMAC；幂等键由 `Idempotency-Key` 指定，归属与 Execution 在同一事务内提交后入队。Task 列表不加载 outputs/inputs。
 - 前端 `/collectors` 发布与调试，`/collector-tasks` 数据查看，`/collection-portal` 为无管理导航的独立调用体验页（凭证仅存内存，所有请求走 /open）。Vite 已代理 /open。
-- 新任务归属不随清空日志丢失；旧版入口保留兼容但不做任务迁移。脚本更新会影响绑定接口，当前没有发布版本快照。更多边界见 docs/collector-platform.md。
+- 新任务归属不随清空日志丢失；旧版入口保留兼容但不做任务迁移。脚本更新影响绑定接口的新任务；执行记录有提交快照，但当前没有独立的接口发布版本。更多边界见 docs/collector-platform.md。
 - MCP 通过 list_open_apps（不返回凭证）、list_published_collectors、publish_collector 支持用户明确要求的发布闭环；单纯脚本创作不自动发布。
 
 ## 已移除的功能
@@ -153,3 +153,12 @@ npm run test:unit  # vitest
 - 采集接口支持 DELETE /api/collectors/{id} 移除：collectors.archived 归档，enabled=false；列表和新调用排除归档接口，历史任务仍关联原记录。移除后释放脚本删除限制，但保留唯一 slug，禁止复用旧调用地址。已有数据库的 archived 列由 init_db 幂等补齐。
 
 - 接口代理模块已移除：不再提供 /api/open-apis 和 /open 通用转发，也不创建 open_apis 表；旧库中的历史规则保留但不会读取。开放服务仅提供明确注册的采集端点、应用和日志功能。
+
+## 参数与全局配置一致性
+
+- `engine/parameters.py` 统一输入定义规范化、默认值合并、必填与类型校验，REST、MCP 试跑、开放采集复用；未声明的输入拒绝，旧字符串数字/布尔默认值兼容规范化，运行实参要求原生类型。
+- `effective_start_url` 使用非空 INPUTS.url 优先于脚本 start_url，runner 的 START_URL、Cookie 域和全局配置域名匹配统一使用该地址。Header 名大小写不敏感，输入覆盖同名全局 Header。
+- 全局配置按通用、父域、具体域顺序合并；旧重复项同范围按 ID 后者覆盖，新建/修改拒绝同类型同名同域配置。域名规范化在 engine/domains.py，忽略端口，支持粘贴 URL。
+- 全局变量列表与写入响应不含 value，仅 has_value；GET /api/global-variables/{id} 显式读取原值。PUT 支持部分更新，未传 value 保留，传空字符串清空。
+- Execution.script_snapshot 保存提交时的脚本、输入定义与浏览器配置，worker 不再读取后续修改的代码；历史空快照任务兼容旧读取路径。该字段不经 ExecutionOut 或外部 API 返回。
+- 页面「保存并运行」先持久化当前编辑内容，再提交真实输入；数字/布尔/敏感参数共用 ParameterValue，未指定值不传。自动 Mock 从页面移除，仅兼容旧 API 显式请求；默认 manual。

@@ -30,7 +30,7 @@ async def test_start_script_execution_enqueues_pending(db, monkeypatch):
         name="s",
         code="pass",
         start_url="",
-        inputs=[],
+        inputs=[{"name": "a", "type": "number", "required": False}],
         outputs=[],
         inherit_global=False,
     )

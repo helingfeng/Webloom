@@ -38,11 +38,9 @@ async def test_grouped_matches_individual_queries(db):
     assert headers == {"X-Token": "t1"}
     assert gvars == {"env": "prod"}
     assert storage == {"sid": "s1"}
-    # 两条同名 cookie 均匹配（绑定域 a.com + 未绑定域全局生效）；
-    # cookie 域名优先变量绑定域，未绑定域用起始 URL host（去端口）
-    assert sorted((c["name"], c["value"], c["domain"]) for c in cookies) == [
-        ("session", "c1", "a.com"),
-        ("session", "c2", "admin.a.com"),
+    # 域名配置覆盖通用同名 Cookie，避免请求携带两个不同 session。
+    assert [(c["name"], c["value"], c["domain"]) for c in cookies] == [
+        ("session", "c1", "a.com")
     ]
 
 
@@ -67,3 +65,22 @@ async def test_grouped_subdomain_match(db):
         db, "https://other.org"
     )
     assert headers2 == {}
+
+
+async def test_specific_domain_always_beats_generic_regardless_of_creation_order(db):
+    await _seed(db, name="authorization", value="specific", domain="api.example.com")
+    await _seed(db, name="Authorization", value="parent", domain="example.com")
+    await _seed(db, name="AUTHORIZATION", value="generic", domain="")
+    headers, _, _, _ = await global_variable_service.get_active_globals_grouped(
+        db, "https://api.example.com:8443/page"
+    )
+    assert headers == {"authorization": "specific"}
+    headers, _, _, _ = await global_variable_service.get_active_globals_grouped(
+        db, "https://evil-example.com"
+    )
+    assert headers == {"AUTHORIZATION": "generic"}
+
+
+async def test_cookie_without_target_url_is_not_injected(db):
+    await _seed(db, name="session", type="cookie", domain="")
+    assert (await global_variable_service.get_active_globals_grouped(db, ""))[3] == []

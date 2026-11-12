@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.global_variable import GlobalVariable
 from app.schemas.global_variable import (
+    GlobalVariableDetailOut,
     GlobalVariableCreate,
     GlobalVariableOut,
     GlobalVariableUpdate,
@@ -29,7 +30,10 @@ async def list_global_variables(db: AsyncSession = Depends(get_db)) -> Any:
 async def create_global_variable(
     var_in: GlobalVariableCreate, db: AsyncSession = Depends(get_db)
 ) -> Any:
-    return await global_variable_service.create_global_variable(db, var_in)
+    try:
+        return await global_variable_service.create_global_variable(db, var_in)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
 
 
 @router.put("/{var_id}", response_model=GlobalVariableOut)
@@ -37,7 +41,10 @@ async def update_global_variable(
     var_id: int, var_in: GlobalVariableUpdate, db: AsyncSession = Depends(get_db)
 ) -> Any:
     var = await _get_var_or_404(db, var_id)
-    return await global_variable_service.update_global_variable(db, var, var_in)
+    try:
+        return await global_variable_service.update_global_variable(db, var, var_in)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
 
 
 @router.delete("/{var_id}", status_code=204)
@@ -46,3 +53,8 @@ async def delete_global_variable(
 ) -> None:
     var = await _get_var_or_404(db, var_id)
     await global_variable_service.delete_global_variable(db, var)
+
+
+@router.get("/{var_id}", response_model=GlobalVariableDetailOut)
+async def get_global_variable(var_id: int, db: AsyncSession = Depends(get_db)) -> Any:
+    return await _get_var_or_404(db, var_id)

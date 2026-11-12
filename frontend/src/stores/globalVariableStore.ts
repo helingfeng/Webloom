@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as gvApi from '@/api/globalVariables'
-import type { GlobalVariable, GlobalVariableCreate } from '@/types/globalVariable'
+import type { GlobalVariable, GlobalVariableCreate, GlobalVariableUpdate } from '@/types/globalVariable'
 
 export const useGlobalVariableStore = defineStore('globalVariables', () => {
   const variables = ref<GlobalVariable[]>([])
@@ -23,7 +23,7 @@ export const useGlobalVariableStore = defineStore('globalVariables', () => {
     return res.data
   }
 
-  async function updateVariable(id: number, data: GlobalVariableCreate) {
+  async function updateVariable(id: number, data: GlobalVariableUpdate) {
     const res = await gvApi.updateGlobalVariable(id, data)
     await fetchVariables()
     return res.data

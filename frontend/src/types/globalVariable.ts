@@ -1,7 +1,7 @@
 export interface GlobalVariable {
   id: number
   name: string
-  value: string
+  has_value: boolean
   type: 'header' | 'variable' | 'localStorage' | 'cookie'
   domain: string
   enabled: boolean
@@ -18,3 +18,6 @@ export interface GlobalVariableCreate {
   enabled?: boolean
   description?: string
 }
+
+export interface GlobalVariableDetail extends GlobalVariable { value: string }
+export type GlobalVariableUpdate = Partial<GlobalVariableCreate>

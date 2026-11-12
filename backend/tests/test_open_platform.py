@@ -99,7 +99,8 @@ def seed_via_api(client: TestClient) -> dict:
             "name": "采集脚本",
             "code": "pass",
             "inputs": [
-                {"name": "url", "type": "string", "required": True, "description": ""}
+                {"name": "url", "type": "string", "required": True, "description": ""},
+                {"name": "keyword", "type": "string", "required": False},
             ],
             "outputs": [],
         },

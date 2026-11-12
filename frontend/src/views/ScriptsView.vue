@@ -90,7 +90,7 @@ async function handleDelete(id: number) {
 const runningIds = ref(new Set<number>())
 
 async function handleRun(row: Script) {
-  if ((row.inputs?.length ?? 0) > 0 && row.run_mode === 'manual') {
+  if ((row.inputs?.length ?? 0) > 0) {
     ElMessage.info('该脚本有输入变量，请在运行配置中填写后运行')
     router.push(`/scripts/${row.id}`)
     return
@@ -99,7 +99,7 @@ async function handleRun(row: Script) {
   runningIds.value = new Set(runningIds.value)
   try {
     const result = await scriptStore.runScript(row.id, {
-      mode: row.run_mode || 'manual',
+      mode: 'manual',
       inputs: {},
       headless: row.headless ?? true,
     })

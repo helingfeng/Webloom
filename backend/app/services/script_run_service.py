@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
 from app.engine.mock_generator import generate_mock_inputs
+from app.engine.parameters import (
+    resolve_inputs,
+    effective_start_url,
+    normalize_definitions,
+)
 from app.engine.runner import (
     cleanup_execution_temp_files,
     execute_script_code,
@@ -44,12 +49,28 @@ async def start_script_execution(
     队列不可用（Redis 未启动）时抛 QueueUnavailableError，该执行留痕为 failed。
     """
     validate_script_code(script.code)
-    user_inputs = {
-        d["name"]: d["default"]
-        for d in (script.inputs or [])
-        if d.get("default") is not None
+    definitions = normalize_definitions(script.inputs or [])
+    user_inputs = (
+        resolve_inputs(definitions, inputs or {})
+        if mode == "manual"
+        else resolve_inputs(definitions, generate_mock_inputs(definitions))
+    )
+    snapshot = {
+        key: getattr(script, key)
+        for key in (
+            "workspace_id",
+            "name",
+            "description",
+            "start_url",
+            "code",
+            "outputs",
+            "inherit_global",
+            "run_mode",
+        )
     }
-    user_inputs.update(inputs or {})
+    snapshot.update(
+        inputs=definitions, headless=script.headless if headless is None else headless
+    )
     execution = Execution(
         target_type="script",
         target_id=script.id,
@@ -58,6 +79,7 @@ async def start_script_execution(
         status="pending",
         logs="",
         outputs={},
+        script_snapshot=snapshot,
         started_at=datetime.now(),
     )
     db.add(execution)
@@ -109,20 +131,20 @@ async def run_script_execution(
             execution.started_at = datetime.now()
             await session.commit()
 
-            script = await script_service.get_script(session, execution.target_id)
+            script = (
+                Script(id=execution.target_id, **execution.script_snapshot)
+                if execution.script_snapshot
+                else await script_service.get_script(session, execution.target_id)
+            )
             if script is None:
                 raise RuntimeError(f"脚本 {execution.target_id} 不存在（可能已被删除）")
 
-            task_inputs = (
-                execution.inputs
-                if execution.mode == "manual"
-                else generate_mock_inputs(script.inputs)
-            )
+            task_inputs = execution.inputs
 
             if script.inherit_global:
                 headers, gvars, local_storage, cookies = (
                     await global_variable_service.get_active_globals_grouped(
-                        session, script.start_url or ""
+                        session, effective_start_url(script.start_url, task_inputs)
                     )
                 )
             else:

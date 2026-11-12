@@ -1,6 +1,7 @@
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.engine.runner import validate_script_code
+from app.engine.parameters import normalize_definitions
 from app.models.script import Script
 from app.models.collector import Collector
 from app.schemas.script import ScriptCreate, ScriptUpdate
@@ -13,7 +14,11 @@ async def get_scripts(
     stmt = select(Script)
     if workspace_id is not None:
         stmt = stmt.where(Script.workspace_id == workspace_id)
-    result = await db.execute(stmt.offset(skip).limit(limit))
+    result = await db.execute(
+        stmt.order_by(Script.updated_at.desc(), Script.id.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     return result.scalars().all()
 
 
@@ -32,7 +37,7 @@ async def create_script(db: AsyncSession, script_in: ScriptCreate) -> Script:
     if script_in.code.strip():
         validate_script_code(script_in.code)
     await _validate_workspace(db, script_in.workspace_id)
-    script = Script(**script_in.model_dump())
+    script = Script(**_validated_payload(script_in))
     db.add(script)
     await db.commit()
     await db.refresh(script)
@@ -46,7 +51,7 @@ async def update_script(
         validate_script_code(script_in.code)
     if script_in.workspace_id != script.workspace_id:
         await _validate_workspace(db, script_in.workspace_id)
-    for key, value in script_in.model_dump().items():
+    for key, value in _validated_payload(script_in).items():
         setattr(script, key, value)
     await db.commit()
     await db.refresh(script)
@@ -81,4 +86,22 @@ async def _ensure_not_published(db: AsyncSession, ids: list[int]) -> None:
         )
     ).scalar_one_or_none()
     if bound:
-        raise ValueError(f"脚本已绑定采集接口「{bound}」，请先在接口中更换脚本")
+        raise ValueError(
+            f"脚本已绑定采集接口「{bound}」，请先更换接口绑定的脚本或移除接口"
+        )
+
+
+def _validated_payload(payload: ScriptCreate | ScriptUpdate) -> dict:
+    data = payload.model_dump()
+    data["name"] = data["name"].strip()
+    data["start_url"] = data["start_url"].strip()
+    if not data["name"] or len(data["name"]) > 255:
+        raise ValueError("脚本名称不能为空且最长 255 字符")
+    data["inputs"] = normalize_definitions(data["inputs"])
+    names = set()
+    for output in data["outputs"]:
+        output["name"] = output["name"].strip()
+        if not output["name"] or output["name"] in names:
+            raise ValueError("输出字段名不能为空或重复")
+        names.add(output["name"])
+    return data

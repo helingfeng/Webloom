@@ -1,126 +1,53 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useScriptStore } from '@/stores/scriptStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { apiError } from '@/api/collectors'
+import type { ScriptCreate } from '@/types/script'
 import ScriptEditor from '@/components/ScriptEditor.vue'
 import ExecutionPanel from '@/components/ExecutionPanel.vue'
-import type { ScriptCreate } from '@/types/script'
-import { ElMessage } from 'element-plus'
-
-const route = useRoute()
-const router = useRouter()
-const scriptStore = useScriptStore()
-const executionStore = useExecutionStore()
-const wsStore = useWorkspaceStore()
-
+const route = useRoute(), router = useRouter()
+const scripts = useScriptStore(), executions = useExecutionStore(), workspaces = useWorkspaceStore()
 const isNew = computed(() => route.path.endsWith('/new'))
 const scriptId = computed(() => Number(route.params.id))
-const loading = ref(false)
-const running = ref(false)
-const showExecutionPanel = ref(false)
-
-onMounted(async () => {
-  if (!isNew.value && scriptId.value) {
-    loading.value = true
-    try {
-      await scriptStore.fetchScript(scriptId.value)
-    } finally {
-      loading.value = false
-    }
-  }
+const loading = ref(false), saving = ref(false), running = ref(false), showPanel = ref(false)
+watch(() => route.fullPath, async () => {
+  if (isNew.value || !scriptId.value) return
+  loading.value = true
+  try { await scripts.fetchScript(scriptId.value) } catch(e) { ElMessage.error(apiError(e)) }
+  finally { loading.value = false }
+}, { immediate: true })
+const initialData = computed<ScriptCreate>(() => !isNew.value && scripts.currentScript?.id === scriptId.value ? scripts.currentScript : {
+  workspace_id: workspaces.currentWorkspaceId ?? 0, name: '', description: '', start_url: '', code: '', inputs: [], outputs: [], inherit_global: true, run_mode: 'manual', headless: true,
 })
-
-const initialData = computed<ScriptCreate>(() => {
-  if (isNew.value || !scriptStore.currentScript) {
-    return {
-      workspace_id: wsStore.currentWorkspaceId ?? 0,
-      name: '',
-      description: '',
-      start_url: '',
-      inputs: [],
-      outputs: [],
-      code: '',
-      run_mode: 'manual',
-      headless: true,
-    }
-  }
-  return scriptStore.currentScript
-})
-
-async function handleSave(data: ScriptCreate) {
-  try {
-    if (isNew.value) {
-      const created = await scriptStore.createScript(data)
-      ElMessage.success('创建成功')
-      router.replace(`/scripts/${created.id}`)
-    } else {
-      await scriptStore.updateScript(scriptId.value, data)
-      ElMessage.success('保存成功')
-    }
-  } catch (error) {
-    ElMessage.error('保存失败')
-    console.error(error)
-  }
-}
-
-async function handleRun(runData: {
-  mode: 'manual' | 'mock'
-  inputs: Record<string, any>
-  headless?: boolean
-}) {
+async function persist(data: ScriptCreate): Promise<number> {
   if (isNew.value) {
-    ElMessage.warning('请先保存脚本')
-    return
+    const created = await scripts.createScript(data)
+    await router.replace(`/scripts/${created.id}`)
+    return created.id
   }
+  const id = scriptId.value
+  await scripts.updateScript(id, data)
+  return id
+}
+async function save(data: ScriptCreate) {
+  saving.value = true
+  try { await persist(data); ElMessage.success('已保存') } catch(e) { ElMessage.error(apiError(e)) }
+  finally { saving.value = false }
+}
+async function run(data: { script: ScriptCreate; mode: 'manual'; inputs: Record<string, unknown>; headless: boolean }) {
   running.value = true
   try {
-    const result = await scriptStore.runScript(scriptId.value, {
-      mode: runData.mode,
-      inputs: runData.inputs,
-      headless: runData.headless ?? true,
-    })
-    showExecutionPanel.value = true
-    if (result.execution_id) {
-      await executionStore.fetchExecution(result.execution_id)
-    }
-  } catch (error) {
-    ElMessage.error('执行失败')
-    console.error(error)
-  } finally {
-    running.value = false
-  }
-}
-
-function handleCancel() {
-  router.push('/scripts')
+    const id = await persist(data.script)
+    const task = await scripts.runScript(id, { mode: 'manual', inputs: data.inputs, headless: data.headless })
+    await executions.fetchExecution(task.execution_id)
+    showPanel.value = true
+  } catch(e) { ElMessage.error(apiError(e)) } finally { running.value = false }
 }
 </script>
-
 <template>
-  <div v-loading="loading">
-    <div class="page-header">
-      <h2>{{ isNew ? '新建脚本' : '编辑脚本' }}</h2>
-    </div>
-
-    <ScriptEditor
-      :initial-data="initialData"
-      :running="running"
-      @save="handleSave"
-      @cancel="handleCancel"
-      @run="handleRun"
-    />
-
-    <ExecutionPanel
-      v-model:visible="showExecutionPanel"
-      :execution="executionStore.currentExecution"
-    />
-  </div>
+  <div v-loading="loading"><h2>{{ isNew ? '新建采集脚本' : '编辑采集脚本' }}</h2><ScriptEditor :initial-data="initialData" :saving="saving" :running="running" @save="save" @run="run" @cancel="router.push('/scripts')" /><ExecutionPanel v-model:visible="showPanel" :execution="executions.currentExecution" /></div>
 </template>
-
-<style scoped>
-.page-header {
-  margin-bottom: 20px;
-}
-</style>
