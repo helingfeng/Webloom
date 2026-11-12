@@ -4,6 +4,9 @@ import HomeView from '../views/HomeView.vue'
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    { path: '/collectors', component: () => import('../views/CollectorsView.vue') },
+    { path: '/collector-tasks', component: () => import('../views/CollectorTasksView.vue') },
+    { path: '/collection-portal', meta: { publicPortal: true }, component: () => import('../views/CollectionPortalView.vue') },
     {
       path: '/',
       name: 'home',
@@ -25,29 +28,9 @@ const router = createRouter({
       component: () => import('../views/ScriptDetailView.vue'),
     },
     {
-      path: '/flows',
-      name: 'flows',
-      component: () => import('../views/FlowsView.vue'),
-    },
-    {
-      path: '/flows/new',
-      name: 'flow-new',
-      component: () => import('../views/FlowDetailView.vue'),
-    },
-    {
-      path: '/flows/:id',
-      name: 'flow-detail',
-      component: () => import('../views/FlowDetailView.vue'),
-    },
-    {
       path: '/executions',
       name: 'executions',
       component: () => import('../views/ExecutionsView.vue'),
-    },
-    {
-      path: '/test-cases',
-      name: 'test-cases',
-      component: () => import('../views/TestCasesView.vue'),
     },
     {
       path: '/workspaces',
@@ -83,11 +66,6 @@ const router = createRouter({
       path: '/open-apps',
       name: 'open-apps',
       component: () => import('../views/OpenAppsView.vue'),
-    },
-    {
-      path: '/open-apis',
-      name: 'open-apis',
-      component: () => import('../views/OpenApisView.vue'),
     },
     {
       path: '/open-logs',

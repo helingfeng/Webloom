@@ -2,10 +2,9 @@ import json
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
 from app.mcp import mcp
-from app.services import agent_skill_service
 
 router = APIRouter()
 
@@ -43,21 +42,3 @@ async def mcp_status(request: Request) -> Any:
             ),
         },
     }
-
-
-@router.get("/skills")
-async def list_agent_skills() -> Any:
-    return agent_skill_service.list_skills()
-
-
-@router.get("/skills/install")
-async def skills_install_info() -> Any:
-    return agent_skill_service.get_install_info()
-
-
-@router.get("/skills/{name}")
-async def get_agent_skill(name: str) -> Any:
-    try:
-        return agent_skill_service.get_skill(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Skill not found")

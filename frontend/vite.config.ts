@@ -35,6 +35,7 @@ export default defineConfig({
           return req.url
         },
       },
+      '/open': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/storage': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

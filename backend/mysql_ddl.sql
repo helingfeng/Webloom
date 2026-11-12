@@ -4,6 +4,39 @@
 -- CREATE DATABASE fishcode DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 
+CREATE TABLE `collector_tasks`
+(
+    `id`            bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `collector_id`  bigint unsigned  NOT NULL COMMENT '发布接口 ID',
+    `app_id`        bigint unsigned  NOT NULL COMMENT '调用应用 ID',
+    `execution_id`  bigint unsigned  NOT NULL COMMENT '执行记录 ID',
+    `request_key`   varchar(128)     NULL COMMENT '调用方幂等键',
+    `request_hash`  varchar(64)      NOT NULL COMMENT '幂等请求摘要',
+    `created_at`    datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '提交时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY (`execution_id`) USING BTREE,
+    UNIQUE KEY `uq_collector_task_request` (`app_id`, `request_key`) USING BTREE,
+    KEY `ix_collector_tasks_app_id` (`app_id`) USING BTREE,
+    KEY `ix_collector_tasks_collector_id` (`collector_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='采集任务持久归属与幂等记录';
+
+CREATE TABLE `collectors`
+(
+    `id`           bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `slug`         varchar(80)          NOT NULL COMMENT '稳定接口标识',
+    `name`         varchar(255)         NOT NULL COMMENT '接口名称',
+    `description`  text                 NOT NULL COMMENT '面向调用方的说明',
+    `script_id`    bigint unsigned      NOT NULL COMMENT '绑定脚本 ID',
+    `app_ids`      json                 NOT NULL COMMENT '授权应用 ID 列表',
+    `enabled`      tinyint(1) unsigned  NOT NULL DEFAULT '1' COMMENT '是否发布',
+    `archived`     tinyint(1) unsigned  NOT NULL DEFAULT '0' COMMENT '是否已移除（保留历史任务）',
+    `created_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY (`slug`) USING BTREE,
+    KEY `ix_collectors_script_id` (`script_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发布的采集接口';
+
 CREATE TABLE `data_views`
 (
     `id`             bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -39,7 +72,7 @@ CREATE TABLE `datasources`
 CREATE TABLE `executions`
 (
     `id`           bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `target_type`  varchar(20)      NOT NULL COMMENT '目标类型：script/flow',
+    `target_type`  varchar(20)      NOT NULL COMMENT '目标类型：script（兼容历史执行类型）',
     `target_id`    bigint unsigned  NOT NULL COMMENT '目标 ID',
     `mode`         varchar(20)      NOT NULL COMMENT '执行模式：manual-真实入参/mock-按输入定义生成 mock',
     `inputs`       json             NOT NULL COMMENT '输入参数 JSON',
@@ -49,23 +82,7 @@ CREATE TABLE `executions`
     `started_at`   datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '开始时间',
     `finished_at`  datetime         NULL COMMENT '结束时间',
     PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='脚本/流程执行记录表';
-
-CREATE TABLE `flows`
-(
-    `id`             bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `workspace_id`   bigint unsigned  NULL COMMENT '逻辑归属 Workspace（无外键）',
-    `name`           varchar(255)     NOT NULL COMMENT '流程名称',
-    `description`    text             NOT NULL COMMENT '描述',
-    `nodes`          json             NOT NULL COMMENT '画布节点 JSON',
-    `edges`          json             NOT NULL COMMENT '画布连线 JSON',
-    `run_mode`       varchar(16)      NOT NULL DEFAULT 'manual' COMMENT '运行方式：manual-手动输入/mock-自动 Mock',
-    `global_inputs`  json             NOT NULL COMMENT '全局输入默认值 JSON（手动模式用）',
-    `created_at`     datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_at`     datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    KEY `ix_flows_workspace_id` (`workspace_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动化流程表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='脚本执行记录表';
 
 CREATE TABLE `global_variables`
 (
@@ -80,17 +97,6 @@ CREATE TABLE `global_variables`
     `updated_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='全局变量表';
-
-CREATE TABLE `modules`
-(
-    `id`              bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `requirement_id`  bigint unsigned  NOT NULL COMMENT '逻辑归属 Requirement（无外键）',
-    `name`            varchar(255)     NOT NULL COMMENT '模块名称',
-    `created_at`      datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_at`      datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    KEY `ix_modules_requirement_id` (`requirement_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='模块表（需求下的功能模块）';
 
 CREATE TABLE `open_api_logs`
 (
@@ -109,20 +115,6 @@ CREATE TABLE `open_api_logs`
     KEY `ix_open_api_logs_app_id` (`app_id`) USING BTREE,
     KEY `ix_open_api_logs_execution_id` (`execution_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='开放接口调用日志表（含认证失败记录）';
-
-CREATE TABLE `open_apis`
-(
-    `id`           bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `name`         varchar(255)         NOT NULL COMMENT '接口名称',
-    `method`       varchar(10)          NOT NULL DEFAULT 'GET' COMMENT 'HTTP 方法：GET/POST/PUT/DELETE/PATCH',
-    `path`         varchar(255)         NOT NULL COMMENT '外部调用路径（相对 /open，支持 {param}）',
-    `target_path`  varchar(255)         NOT NULL COMMENT '内部目标路径（以 /api/ 开头）',
-    `enabled`      tinyint(1) unsigned  NOT NULL DEFAULT '1' COMMENT '是否启用：1-启用/0-停用',
-    `description`  text                 NOT NULL COMMENT '描述',
-    `created_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_at`   datetime             NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='开放接口表（代理规则：外部路径 → 平台内部 /api 接口）';
 
 CREATE TABLE `open_apps`
 (
@@ -158,18 +150,6 @@ CREATE TABLE `query_history`
     KEY `ix_query_history_datasource_id` (`datasource_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='SQL 执行历史表';
 
-CREATE TABLE `requirements`
-(
-    `id`            bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `workspace_id`  bigint unsigned  NOT NULL COMMENT '逻辑归属 Workspace（无外键）',
-    `name`          varchar(255)     NOT NULL COMMENT '需求名称',
-    `description`   text             NOT NULL COMMENT '描述',
-    `created_at`    datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_at`    datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    KEY `ix_requirements_workspace_id` (`workspace_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='需求表';
-
 CREATE TABLE `scripts`
 (
     `id`              bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -202,23 +182,6 @@ CREATE TABLE `skills`
     `updated_at`       datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='脚本技能模板表';
-
-CREATE TABLE `test_cases`
-(
-    `id`               bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `requirement_id`   bigint unsigned  NOT NULL COMMENT '逻辑归属 Requirement（无外键）',
-    `module_id`        bigint unsigned  NULL COMMENT '模块 ID（空为直属于需求）',
-    `title`            varchar(255)     NOT NULL COMMENT '用例标题',
-    `precondition`     text             NOT NULL COMMENT '前置条件',
-    `steps`            json             NOT NULL COMMENT '测试步骤 JSON',
-    `expected_result`  text             NOT NULL COMMENT '预期结果',
-    `status`           varchar(16)      NOT NULL DEFAULT 'pending' COMMENT '状态：pending/in_progress/completed/blocked',
-    `created_at`       datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_at`       datetime         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    KEY `ix_test_cases_module_id` (`module_id`) USING BTREE,
-    KEY `ix_test_cases_requirement_id` (`requirement_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='测试用例表';
 
 CREATE TABLE `workspaces`
 (

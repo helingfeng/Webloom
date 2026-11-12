@@ -45,6 +45,7 @@ class FakeRedis:
         self.published: list[tuple[str, str]] = []
         self.kv: dict[str, str] = {}
         self.deleted: list[str] = []
+        self.removed_jobs: list[tuple[str, str]] = []
 
     async def publish(self, channel: str, message: str) -> int:
         self.published.append((channel, message))
@@ -65,6 +66,10 @@ class FakeRedis:
                 del self.kv[k]
                 n += 1
         return n
+
+    async def zrem(self, key: str, member: str) -> int:
+        self.removed_jobs.append((key, member))
+        return 1
 
     async def zcard(self, key: str) -> int:
         return 0

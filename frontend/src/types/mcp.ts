@@ -16,24 +16,3 @@ export interface McpStatus {
     trae_cli_command: string
   }
 }
-
-export interface AgentSkillSummary {
-  name: string
-  description: string
-}
-
-export interface AgentSkillDetail extends AgentSkillSummary {
-  content: string
-}
-
-export interface SkillInstallClient {
-  client: string
-  user_dir: string
-  project_dir: string
-  command: string
-}
-
-export interface SkillInstallInfo {
-  source_dir: string
-  clients: SkillInstallClient[]
-}

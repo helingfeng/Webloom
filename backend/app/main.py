@@ -1,4 +1,6 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from app.services.browser_authoring_service import browser_sessions
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -6,7 +8,6 @@ from app.database import init_db
 from app.config import settings
 from app.routers import (
     scripts,
-    flows,
     executions,
     skills,
     global_variables,
@@ -16,14 +17,14 @@ from app.routers import (
     workspace,
     code,
     mcp as mcp_api,
-    requirements,
-    modules,
-    test_cases,
     open_platform,
+)
+from app.routers.collectors import (
+    admin_router as collectors_router,
+    tasks_router as collector_tasks_router,
 )
 from app.services import log_stream_service
 from app.services.datasource_query_service import connection_manager
-from app.services.open_api_service import close_proxy_client
 from app.task_queue import close_pool, get_pool, queue_stats
 from app.task_queue import QueueUnavailableError
 from app.mcp import mcp, mount_mcp
@@ -37,10 +38,16 @@ async def lifespan(app: FastAPI):
         await get_pool()
     except QueueUnavailableError:
         pass
-    async with mcp.session_manager.run():
-        yield
+    sweeper = asyncio.create_task(browser_sessions.sweep())
+    try:
+        async with mcp.session_manager.run():
+            yield
+    finally:
+        sweeper.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweeper
+        await browser_sessions.close_all()
     await close_pool()
-    await close_proxy_client()
     await connection_manager.dispose_all()
 
 
@@ -58,8 +65,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(collectors_router, prefix="/api/collectors", tags=["collectors"])
+app.include_router(
+    collector_tasks_router, prefix="/api/collector-tasks", tags=["collectors"]
+)
+
 app.include_router(scripts.router, prefix="/api/scripts", tags=["scripts"])
-app.include_router(flows.router, prefix="/api/flows", tags=["flows"])
 app.include_router(executions.router, prefix="/api/executions", tags=["executions"])
 app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
 app.include_router(
@@ -72,13 +83,13 @@ app.include_router(data_views.public_router, prefix="/api/data", tags=["data"])
 app.include_router(workspace.router, prefix="/api/workspaces", tags=["workspaces"])
 app.include_router(code.router, prefix="/api/code", tags=["code"])
 app.include_router(mcp_api.router, prefix="/api/mcp", tags=["mcp"])
-app.include_router(requirements.router, prefix="/api/requirements", tags=["requirements"])
-app.include_router(modules.router, prefix="/api/modules", tags=["modules"])
-app.include_router(test_cases.router, prefix="/api/test-cases", tags=["test-cases"])
-# 开放平台：管理端（应用/接口/日志）+ 外部开放端点（/open，签名认证）
-app.include_router(open_platform.open_apps_router, prefix="/api/open-apps", tags=["open"])
-app.include_router(open_platform.open_apis_router, prefix="/api/open-apis", tags=["open"])
-app.include_router(open_platform.open_logs_router, prefix="/api/open-logs", tags=["open"])
+# 开放平台：应用凭证与调用日志管理 + 外部采集端点
+app.include_router(
+    open_platform.open_apps_router, prefix="/api/open-apps", tags=["open"]
+)
+app.include_router(
+    open_platform.open_logs_router, prefix="/api/open-logs", tags=["open"]
+)
 app.include_router(open_platform.open_router, prefix="/open", tags=["open"])
 
 app.mount("/storage", StaticFiles(directory=settings.storage_dir), name="storage")

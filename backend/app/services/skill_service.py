@@ -214,7 +214,7 @@ def _build_verify_new_data_skill() -> Skill:
 5. selector 优先使用 id、name、placeholder、type、data-* 等稳定属性，避免依赖动态生成的 class
 6. 定位新增记录优先使用列表页的搜索/筛选功能缩小范围（按名称、编号等唯一字段检索），避免翻页遍历
 7. 找到新增记录后，提取该条记录的关键字段写入 OUTPUTS["data"]（dict），字段名与页面列名对应
-8. 校验结果写入 OUTPUTS["found"]（boolean）；新增数据通常在提交流程之后，可配合流程编排用 {{node_xxx.xxx}} 引用上游脚本输出的字段（如订单号、名称）作为检索关键字
+8. 校验结果写入 OUTPUTS["found"]（boolean）；新增数据可在提交后校验，通过 INPUTS 传入订单号、名称等检索关键字
 9. 断言规范：
    - 列表加载、搜索结果出现优先用 Playwright 内置断言，expect 已由模板导入可直接使用，例如：await expect(page.locator("table tbody tr").first).to_be_visible()
    - 找不到新增记录属业务失败：用软校验，将 status=failed、error 与 found=false 写入 OUTPUTS，不要抛异常（便于排查数据是否落库）

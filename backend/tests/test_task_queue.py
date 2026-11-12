@@ -45,20 +45,6 @@ async def test_enqueue_script_run_uses_expected_job(monkeypatch):
     assert call["_job_id"] == "exec:7"
 
 
-async def test_enqueue_flow_run_uses_expected_job(monkeypatch):
-    pool = _FakePool()
-
-    async def fake_get_pool():
-        return pool
-
-    monkeypatch.setattr(task_queue, "get_pool", fake_get_pool)
-    await task_queue.enqueue_flow_run(9)
-    call = pool.calls[0]
-    assert call["function"] == "run_flow_execution"
-    assert call["args"] == (9,)
-    assert call["_job_id"] == "exec:9"
-
-
 async def test_job_key_format():
     assert task_queue.job_key(3) == "arq:job:exec:3"
 

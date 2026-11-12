@@ -1,13 +1,4 @@
-"""开放平台路由：管理端（应用/接口/日志）+ 外部开放端点（/open 前缀）。
-
-外部端点分两类：
-- 内置采集接口：/open/api/v1/collect/{trigger,result,tasks}
-- 代理接口：open_apis 表配置的「外部路径 → 内部 /api 路径」映射（catch-all 兜底，
-  必须在内置路由之后注册，FastAPI 按注册顺序匹配）
-
-管理端 router 挂 /api/open-apps、/api/open-apis、/api/open-logs；
-开放 router 挂 /open（Server-to-Server 调用，不涉及 CORS）。
-"""
+"""开放应用与调用日志管理、采集接口，以及旧版通用采集入口。"""
 
 import json
 from typing import Any
@@ -15,14 +6,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.routers.collectors import public_router as collectors_public_router
 from app.database import get_db
 from app.schemas.open_platform import (
     OpenApiLogOut,
     OpenApiLogPageOut,
-    OpenApiRouteCreate,
-    OpenApiRouteOut,
-    OpenApiRoutePageOut,
-    OpenApiRouteUpdate,
     OpenAppCreate,
     OpenAppDetailOut,
     OpenAppOut,
@@ -61,7 +49,9 @@ async def list_open_apps(
 
 
 @open_apps_router.post("", response_model=OpenAppDetailOut, status_code=201)
-async def create_open_app(app_in: OpenAppCreate, db: AsyncSession = Depends(get_db)) -> Any:
+async def create_open_app(
+    app_in: OpenAppCreate, db: AsyncSession = Depends(get_db)
+) -> Any:
     try:
         return await open_app_service.create_open_app(db, app_in)
     except ValueError as exc:
@@ -97,54 +87,6 @@ async def regenerate_open_app_secret(
 async def delete_open_app(app_id: int, db: AsyncSession = Depends(get_db)) -> None:
     app = await _get_app_or_404(db, app_id)
     await open_app_service.delete_open_app(db, app)
-
-
-# ---------------- 管理端：开放接口（代理规则）----------------
-
-open_apis_router = APIRouter()
-
-
-async def _get_route_or_404(db: AsyncSession, route_id: int):
-    route = await open_api_service.get_route(db, route_id)
-    if not route:
-        raise HTTPException(status_code=404, detail="Open api route not found")
-    return route
-
-
-@open_apis_router.get("", response_model=OpenApiRoutePageOut)
-async def list_open_apis(
-    skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)
-) -> Any:
-    items = await open_api_service.get_routes(db, skip=skip, limit=limit)
-    total = await open_api_service.count_routes(db)
-    return {"items": items, "total": total}
-
-
-@open_apis_router.post("", response_model=OpenApiRouteOut, status_code=201)
-async def create_open_api(
-    route_in: OpenApiRouteCreate, db: AsyncSession = Depends(get_db)
-) -> Any:
-    try:
-        return await open_api_service.create_route(db, route_in)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@open_apis_router.put("/{route_id}", response_model=OpenApiRouteOut)
-async def update_open_api(
-    route_id: int, route_in: OpenApiRouteUpdate, db: AsyncSession = Depends(get_db)
-) -> Any:
-    route = await _get_route_or_404(db, route_id)
-    try:
-        return await open_api_service.update_route(db, route, route_in)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@open_apis_router.delete("/{route_id}", status_code=204)
-async def delete_open_api(route_id: int, db: AsyncSession = Depends(get_db)) -> None:
-    route = await _get_route_or_404(db, route_id)
-    await open_api_service.delete_route(db, route)
 
 
 # ---------------- 管理端：调用日志 ----------------
@@ -183,7 +125,9 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
-async def _auth_or_response(db: AsyncSession, request: Request) -> tuple[Any, Response | None]:
+async def _auth_or_response(
+    db: AsyncSession, request: Request
+) -> tuple[Any, Response | None]:
     """认证 + 失败留痕。通过返回 (app, None)；失败返回 (None, 已记录日志的 401 Response)"""
     app_key = request.headers.get("X-App-Key", "")
     app, err = await open_app_service.authenticate_request(db, request)
@@ -208,7 +152,9 @@ async def _auth_or_response(db: AsyncSession, request: Request) -> tuple[Any, Re
 
 
 @open_router.post("/api/v1/collect/trigger")
-async def open_collect_trigger(request: Request, db: AsyncSession = Depends(get_db)) -> Any:
+async def open_collect_trigger(
+    request: Request, db: AsyncSession = Depends(get_db)
+) -> Any:
     """开放数据采集：传入链接发起指定脚本执行（异步，立即返回 execution_id）"""
     app, error_response = await _auth_or_response(db, request)
     if error_response is not None:
@@ -233,26 +179,40 @@ async def open_collect_trigger(request: Request, db: AsyncSession = Depends(get_
 
     if error is not None:
         await open_api_service.record_open_log(
-            db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-            method=request.method, status_code=400, success=False,
-            request_ip=_client_ip(request), detail=error,
+            db,
+            app_id=app.id,
+            app_key=app.app_key,
+            path=request.url.path,
+            method=request.method,
+            status_code=400,
+            success=False,
+            request_ip=_client_ip(request),
+            detail=error,
         )
         return Response(
             content=json.dumps({"detail": error}, ensure_ascii=False),
-            status_code=400, media_type="application/json",
+            status_code=400,
+            media_type="application/json",
         )
 
     script = await script_service.get_script(db, script_id)
     if script is None:
         error = f"脚本 {script_id} 不存在"
         await open_api_service.record_open_log(
-            db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-            method=request.method, status_code=404, success=False,
-            request_ip=_client_ip(request), detail=error,
+            db,
+            app_id=app.id,
+            app_key=app.app_key,
+            path=request.url.path,
+            method=request.method,
+            status_code=404,
+            success=False,
+            request_ip=_client_ip(request),
+            detail=error,
         )
         return Response(
             content=json.dumps({"detail": error}, ensure_ascii=False),
-            status_code=404, media_type="application/json",
+            status_code=404,
+            media_type="application/json",
         )
 
     extra_inputs = payload.get("inputs")
@@ -267,21 +227,34 @@ async def open_collect_trigger(request: Request, db: AsyncSession = Depends(get_
         )
     except QueueUnavailableError as exc:
         await open_api_service.record_open_log(
-            db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-            method=request.method, status_code=503, success=False,
-            request_ip=_client_ip(request), detail=f"执行队列不可用：{exc}",
+            db,
+            app_id=app.id,
+            app_key=app.app_key,
+            path=request.url.path,
+            method=request.method,
+            status_code=503,
+            success=False,
+            request_ip=_client_ip(request),
+            detail=f"执行队列不可用：{exc}",
         )
         return Response(
             content=json.dumps(
                 {"detail": "执行队列不可用，请稍后重试"}, ensure_ascii=False
             ),
-            status_code=503, media_type="application/json",
+            status_code=503,
+            media_type="application/json",
         )
 
     await open_api_service.record_open_log(
-        db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-        method=request.method, status_code=200, success=True,
-        execution_id=execution.id, request_ip=_client_ip(request),
+        db,
+        app_id=app.id,
+        app_key=app.app_key,
+        path=request.url.path,
+        method=request.method,
+        status_code=200,
+        success=True,
+        execution_id=execution.id,
+        request_ip=_client_ip(request),
         detail=f"脚本 {script.name}",
     )
     return {
@@ -306,20 +279,29 @@ async def open_collect_result(
     if execution_id not in owned:
         error = "执行不存在或无权查询"
         await open_api_service.record_open_log(
-            db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-            method=request.method, status_code=404, success=False,
-            execution_id=execution_id, request_ip=_client_ip(request), detail=error,
+            db,
+            app_id=app.id,
+            app_key=app.app_key,
+            path=request.url.path,
+            method=request.method,
+            status_code=404,
+            success=False,
+            execution_id=execution_id,
+            request_ip=_client_ip(request),
+            detail=error,
         )
         return Response(
             content=json.dumps({"detail": error}, ensure_ascii=False),
-            status_code=404, media_type="application/json",
+            status_code=404,
+            media_type="application/json",
         )
 
     execution = await execution_service.get_execution(db, execution_id)
     if execution is None:
         return Response(
             content=json.dumps({"detail": "执行不存在或无权查询"}, ensure_ascii=False),
-            status_code=404, media_type="application/json",
+            status_code=404,
+            media_type="application/json",
         )
 
     return {
@@ -371,70 +353,4 @@ async def open_collect_tasks(
     return {"items": tasks, "total": len(tasks)}
 
 
-@open_router.api_route(
-    "/{route_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"]
-)
-async def open_proxy(
-    route_path: str, request: Request, db: AsyncSession = Depends(get_db)
-) -> Any:
-    """代理接口：按 open_apis 表配置把外部请求转发到平台内部 /api 接口"""
-    app, error_response = await _auth_or_response(db, request)
-    if error_response is not None:
-        return error_response
-
-    actual_path = "/" + route_path.lstrip("/")
-    matched: dict[str, str] | None = None
-    route = None
-    for candidate in await open_api_service.get_routes(db, skip=0, limit=200):
-        if not candidate.enabled or candidate.method != request.method:
-            continue
-        matched = open_api_service.match_route_path(candidate, actual_path)
-        if matched is not None:
-            route = candidate
-            break
-
-    if route is None or matched is None:
-        error = "接口不存在或已停用"
-        await open_api_service.record_open_log(
-            db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-            method=request.method, status_code=404, success=False,
-            request_ip=_client_ip(request), detail=error,
-        )
-        return Response(
-            content=json.dumps({"detail": error}, ensure_ascii=False),
-            status_code=404, media_type="application/json",
-        )
-
-    target_path = open_api_service.build_target_path(route, matched)
-    body: bytes | None = request.state.body or None
-    try:
-        internal_response = await open_api_service.forward_request(
-            request.method,
-            target_path,
-            params=dict(request.query_params),
-            content=body,
-            content_type=request.headers.get("Content-Type", "application/json"),
-        )
-    except Exception as exc:  # 内部服务不可达等
-        await open_api_service.record_open_log(
-            db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-            method=request.method, status_code=502, success=False,
-            request_ip=_client_ip(request), detail=f"内部转发失败：{exc}",
-        )
-        return Response(
-            content=json.dumps({"detail": "平台内部服务暂时不可用"}, ensure_ascii=False),
-            status_code=502, media_type="application/json",
-        )
-
-    status_ok = internal_response.status_code < 400
-    await open_api_service.record_open_log(
-        db, app_id=app.id, app_key=app.app_key, path=request.url.path,
-        method=request.method, status_code=internal_response.status_code,
-        success=status_ok, request_ip=_client_ip(request),
-        detail=f"→ {target_path}" if status_ok else internal_response.text[:300],
-    )
-    return Response(
-        content=internal_response.content,
-        status_code=internal_response.status_code,
-        media_type=internal_response.headers.get("Content-Type", "application/json"),
-    )
+open_router.include_router(collectors_public_router)

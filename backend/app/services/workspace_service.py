@@ -2,8 +2,6 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.workspace import Workspace
 from app.models.script import Script
-from app.models.flow import Flow
-from app.models.requirement import Requirement
 from app.schemas.workspace import WorkspaceCreate, WorkspaceUpdate
 
 
@@ -17,7 +15,9 @@ async def get_workspace(db: AsyncSession, ws_id: int) -> Workspace | None:
     return result.scalar_one_or_none()
 
 
-async def _validate_name(db: AsyncSession, name: str, exclude_id: int | None = None) -> None:
+async def _validate_name(
+    db: AsyncSession, name: str, exclude_id: int | None = None
+) -> None:
     result = await db.execute(select(Workspace).where(Workspace.name == name))
     existing = result.scalar_one_or_none()
     if existing is not None and existing.id != exclude_id:
@@ -47,22 +47,11 @@ async def update_workspace(
 
 
 async def delete_workspace(db: AsyncSession, ws: Workspace) -> None:
-    """删除前校验：其下有脚本、流程或需求则拒绝（提示先清空）"""
+    """空间下存在脚本时拒绝删除。"""
     script_count = await db.scalar(
         select(func.count()).select_from(Script).where(Script.workspace_id == ws.id)
     )
-    flow_count = await db.scalar(
-        select(func.count()).select_from(Flow).where(Flow.workspace_id == ws.id)
-    )
-    req_count = await db.scalar(
-        select(func.count())
-        .select_from(Requirement)
-        .where(Requirement.workspace_id == ws.id)
-    )
-    if script_count or flow_count or req_count:
-        raise ValueError(
-            f"该空间下仍有 {script_count} 个脚本、{flow_count} 个流程、"
-            f"{req_count} 个需求，请先移动或删除"
-        )
+    if script_count:
+        raise ValueError(f"该空间下仍有 {script_count} 个脚本，请先移动或删除")
     await db.delete(ws)
     await db.commit()

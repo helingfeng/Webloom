@@ -1,13 +1,13 @@
 # AGENTS.md
 
-小鱼（fishCode）架构指引。本地运行的自动化测试与数据采集平台：编写 Playwright Python 脚本、可视化编排流程、执行并查看实时日志；配套数据源管理与数据视图（SQL 对外取数）。
+小鱼（fishCode）架构指引。以 MCP 为主入口的网页数据采集平台：创作、验证并保存 Playwright Python 脚本，发布采集接口，查看任务与结果数据；数据源与数据视图继续提供管理能力。
 
 ## 1. 项目概览
 
 前后端分离的本地单用户平台：
 
-- **backend/** — FastAPI + SQLAlchemy 2.0 (async) + MySQL。负责脚本/流程/执行记录/全局变量/测试用例/数据源/数据视图的 CRUD，通过子进程运行 Playwright Python 脚本并收集结果；内嵌 MCP 服务。
-- **frontend/** — Vue 3 + TypeScript + Element Plus + Pinia + Vue Flow（流程画布）+ Monaco（代码/SQL 编辑器）。开发时由 Vite 代理 `/api`、`/storage` 到后端（含 WebSocket）。
+- **backend/** — FastAPI + SQLAlchemy 2.0 (async) + MySQL。负责脚本/采集接口/任务/执行记录/全局变量/数据源/数据视图的 CRUD，通过子进程运行 Playwright Python 脚本并收集结果；内嵌 MCP 服务。
+- **frontend/** — Vue 3 + TypeScript + Element Plus + Pinia+ Monaco（代码/SQL 编辑器）。开发时由 Vite 代理 `/api`、`/storage` 到后端（含 WebSocket）。
 
 核心执行流：前端点击运行 → `POST /api/scripts/{id}/run` 立即返回 execution_id → 后台任务将用户代码嵌入 `SCRIPT_TEMPLATE`（`backend/app/engine/runner.py`）→ 子进程执行 → stdout 逐行经 WebSocket `/api/ws/executions/{id}` 推送到前端 → 前端同时每秒轮询 execution 状态直到结束。
 
@@ -23,38 +23,37 @@
 - **全局变量三种类型**：`header`（注入浏览器 `extra_http_headers`）、`localStorage`（执行前访问起始 URL 自动写入）、`variable`（注入 `GLOBAL_VARS`），另有 cookie 支持；按域名匹配（精确或子域名，未绑定域名的全局生效）。脚本通过 `Script.inherit_global`（默认 true）控制是否继承。
 - **队列执行模式（Redis + arq worker）**：API 进程只创建 `pending` 状态 Execution 并经 `task_queue.enqueue_*` 入队（`_job_id = exec:{execution_id}` 幂等防重），实际执行在独立 worker 进程（`app/worker.py`）。Redis 不可用时 run 接口返回 503、该执行留痕 failed。worker `max_jobs` = `max_concurrent_executions`（默认 5）；`job_timeout` = `script_execution_timeout + 30`。恢复机制：worker 启动时把 `running` 执行标为 failed（worker 重启中断）并清理残留 job 键；心跳循环每 10s 兜底把超龄（>60s）`pending` 重新入队（Redis 重启丢队列后自愈，`_job_id` 去重不会重复执行）。worker 无 `--reload`，改后端代码需手动重启；**单机只跑一个 worker**（多个会误触发恢复逻辑）。
 - **日志流（LogBus）**：worker 内 `services/log_bus.py::ExecutionLogBus` 每行分配递增 seq（1 seq = 1 行，行尾强制 `\n`），经 Redis pub/sub（channel `exec:logs:{id}`，内部 JSON 含 seq/eof 控制消息）实时分发 + 每 1s 增量 `CONCAT` 落库 `executions.logs`（Text 64KB 超限时自动停落库，实时流不受影响）。API 进程 `services/log_stream_service.py` 先订阅再从 DB 重放、seq 对齐去重补洞，EOF（终态落库后发布）触发收尾；Redis 不可用自动退化为 DB 轮询。对前端 WS 消息保持纯文本日志行。
-- **流程执行**：`flow_service._run_flow_nodes` 按 `_topological_layers` 分层拓扑排序（**有环抛 ValueError**，不再静默跳过），同层节点 `asyncio.gather` 并行执行（上限 `FLOW_NODE_CONCURRENCY=3`），节点间通过 `{{global.xxx}}`、`{{node_xxx.xxx}}` 模板语法传递变量；节点日志带 `[node <id>]` 前缀。会话相关操作（查脚本/全局变量/解析输入）在每层开始前串行完成（AsyncSession 不允许并发使用），仅子进程执行并行。
 - **MySQL 迁移**：无 Alembic。`database.py` 的 `init_db()` 在 `create_all` 后对已有表做幂等 `ALTER TABLE ... ADD COLUMN`（`_migrate` 内先 `inspect` 检查列是否存在）。新建表无需迁移，仅给已有表加列时写 ALTER 块。主库为 MySQL，`_migrate` 裸 SQL 必须双方言兼容：标识符统一反引号（`usage`/`key`/`database` 等为 MySQL 保留字），索引用 `inspector.get_indexes()` 判断后再 `CREATE INDEX`（MySQL 不支持 `IF NOT EXISTS`）。建表 DDL 由 `backend/scripts/gen_mysql_ddl.py` 从模型生成到 `backend/mysql_ddl.sql`（改模型后必须重新生成；模型列须带 `comment`，主键/ID 列用 `BigIntUnsigned`）。
-- **测试用例组织**：项目空间（workspaces）→ 需求（requirements）→ 模块（modules）三级，用例挂模块下。
 
 ### 开放平台
 
-- **模型与凭证**：`models/open_platform.py` 三表——`open_apps`（App Key `fk*` 唯一 + Secret，Secret 明文存但**列表接口不回传**，仅创建/详情/重新生成返回）、`open_apis`（代理规则：外部路径 → 内部 `/api/` 路径，`(method, path)` 唯一）、`open_api_logs`（每次开放调用留痕，含认证失败；`execution_id` 关联采集触发）。
+- **模型与凭证**：`models/open_platform.py` 两表——`open_apps`（App Key `fk*` 唯一 + Secret，Secret 明文存但**列表接口不回传**，仅创建/详情/重新生成返回）、`open_api_logs`（每次开放调用留痕，含认证失败；`execution_id` 关联采集触发）。
 - **签名认证**（`open_app_service.authenticate_request`）：头 `X-App-Key` / `X-Timestamp` / `X-Sign`；`X-Sign = HMAC-SHA256(secret, "{METHOD}\n{完整路径含/open}\n{timestamp}\n{sha256_hex(body)}")` 小写 hex；时间窗 `open_api_sign_ttl_seconds`（±300s）；恒时比较；签名只覆盖 path **不含 query**。认证失败也落日志。
 - **内置采集接口**（`/open/api/v1/collect/*`，固定开放）：`POST trigger`（传 `url` + `script_id`，url 强制合入 `inputs.url`，复用 `start_script_execution` 入队，QueueUnavailable → 503）；`GET result?execution_id=`（**归属校验**：只能查本应用触发的执行，从 `open_api_logs` 反查）；`GET tasks`（本应用最近触发任务，最多 50 条）。
-- **代理转发**（`open_api_service`）：`{param}` 路径模板经正则匹配替换到 target_path；httpx AsyncClient 转发到 `open_api_internal_base_url`（默认 `http://127.0.0.1:8000`，lifespan 关闭），透传 body/query，**target 必须以 /api/ 开头**（service 层校验，防指向外部）；catch-all 路由必须注册在内置路由之后。
-- **管理端与前端**：`routers/open_platform.py` 导出 4 个 router（挂 `/api/open-apps`、`/api/open-apis`、`/api/open-logs`、`/open`）；前端菜单组「开放平台」4 页（开放应用/开放接口/调用日志/接入文档），AppLayout 的 menuItems 用 `children` + `el-sub-menu` 渲染分组。
+- **管理端与前端**：`routers/open_platform.py` 导出 3 个 router（挂 `/api/open-apps`、`/api/open-logs`、`/open`）；前端菜单组「开放平台」包含采集接口、采集任务与数据、开放应用、调用日志、接入文档，AppLayout 的 menuItems 用 `children` + `el-sub-menu` 渲染分组。
 
 ### 数据源与数据视图
 
 - **连接池**：`datasource_query_service.connection_manager` 按 `(datasource_id, database)` 缓存 `AsyncEngine`；`invalidate(ds_id)` 释放该数据源全部库的 engine（配置变更/超时/连接异常后调用）；应用退出 `dispose_all`。
 - **多库切换**：`list_tables` / `get_table_schema` / `execute_query` / `execute_readonly_query` 均接受可选 `database`，缺省回退数据源默认库（`effective = database or ds.database`）。`list_databases` 过滤 4 个系统库。
 - **SQL 执行安全**：`_preprocess` 剥离注释后校验单语句；`_classify` 按首 token 白名单分流查询/执行路径；查询路径 `fetchmany` 截断 `settings.sql_max_rows`（1000）行；无绑定参数时字面 `%` 必须转义为 `%%`（aiomysql pyformat）。`validate_readonly_sql` 是数据视图与 MCP 只读查询共用的双保险之一。
-- **数据视图**：数据源 + 只读 SQL，保存后外部系统通过 `GET /api/data/{slug}` 无鉴权取 JSON（`public_router`，手动加 CORS 头）；停用视图对外表现为不存在。脚本/流程执行前预取所有启用视图注入 `DATA_VIEWS`（经 `ATP_DATA_VIEWS` 环境变量），单视图失败值为 `{"_error": ...}` 不影响脚本。预取用 `collect_view_data_cached`：视图 SQL 并行执行（`VIEW_CONCURRENCY=4`）+ worker 侧 TTL 缓存（`cache_ttl_seconds` 默认 30s，键含 `updated_at`，编辑即失效；并发共享同一次查询；失败不缓存）。管理端预览与公开取数不走缓存。
+- **数据视图**：数据源 + 只读 SQL，保存后外部系统通过 `GET /api/data/{slug}` 无鉴权取 JSON（`public_router`，手动加 CORS 头）；停用视图对外表现为不存在。脚本引用 DATA_VIEWS / DATA_VIEWS_ONE 时预取启用视图注入 `DATA_VIEWS`（经 `ATP_DATA_VIEWS` 环境变量），单视图失败值为 `{"_error": ...}` 不影响脚本。预取用 `collect_view_data_cached`：视图 SQL 并行执行（`VIEW_CONCURRENCY=4`）+ worker 侧 TTL 缓存（`cache_ttl_seconds` 默认 30s，键含 `updated_at`，编辑即失效；并发共享同一次查询；失败不缓存）。管理端预览与公开取数不走缓存。
 - **SQL 执行历史**：工作台执行（含失败）自动落 `query_history` 表，结果快照仅保留前 200 行样本；删除数据源时级联清理。落历史失败静默回滚，不影响执行响应。
 
 ### MCP 服务
 
 - `backend/app/mcp/server.py`：官方 `mcp` 包的 FastMCP，以 streamable-http 子应用嵌入 FastAPI 进程（端点 `/mcp`），**直接 import services 层，不走 HTTP**；每个工具内 `async with AsyncSessionLocal() as db:` 自建会话；业务异常转 `ToolError`。挂载必须放在所有路由之后（`mount_mcp(app)`）。
-- 工具集：脚本（list/get/create/update/delete/run_script + get_execution 轮询）、`list_workspaces`、`get_auth_credentials`（按域名查全局变量凭证）、数据源查询（list_datasources / list_databases / list_tables / get_table_schema / query_database，**只读**）。新增工具照 `@mcp.tool()` 样板，并同步更新顶部 `INSTRUCTIONS`。
-- `GET /api/mcp/status` 返回真实工具列表与客户端接入命令（服务名 `fishcode-scripts` 硬编码于该接口，改名需同步）；Agent Skills 文档在 `backend/app/agent_skills/{script-authoring,script-execution,script-maintenance}/SKILL.md`，由 `agent_skill_service` 读取并在 `/api/mcp/skills` 暴露。
+- 工具集：采集闭环（`inspect_page` 探索页面并自动注入已配置登录态、`list_workspaces` / `create_workspace` / `list_scripts` / `get_script` 查找与准备、`create_script` / `update_script` 管理、`run_script` / `get_execution` 执行）。MCP 不回传明文凭证；数据源不通过 MCP 暴露。新增工具照 `@mcp.tool()` 样板，并同步更新顶部 `INSTRUCTIONS`。
+- `GET /api/mcp/status` 返回真实工具列表与客户端接入命令（服务名 `fishcode-scripts` 硬编码于该接口，改名需同步）；脚本创作规范内置在 `backend/app/mcp/server.py` 的 MCP instructions 和工具描述中，AgentHarness 不需要额外 Skills。
 
 ## 2. 构建与命令
 
 ### 基础设施（先于后端启动）
 
 ```bash
-redis-server --port 6390 --daemonize yes --save '' --appendonly no   # 执行队列（.env 的 REDIS_URL 指向 6390；本机 6379 被其他带密码 Redis 占用）
+# 使用 backend/.env 中 REDIS_URL 对应的实例，已有 Redis 时无需重复启动。
+# 本机当前使用 6379 的需认证实例，凭证仅保存在未跟踪的 backend/.env。
+# 新环境需要独立实例时，可选择空闲端口并同步配置 REDIS_URL。
 ```
 
 ### 后端 API（端口 8000）
@@ -90,7 +89,7 @@ npm run test:unit  # vitest
 
 ### 注意事项
 
-- 临时执行脚本写入系统临时目录（`config.py` 的 `executions_dir` 指向 `tempfile.gettempdir()/atp_executions`）。**不要**改回 `backend/storage/`，否则 uvicorn `--reload` 会监听到运行文件导致服务自动重启、中断 WebSocket。运行文件带随机后缀（流程并行节点互不覆写）并在执行后即删（`runner.py` finally + `cleanup_execution_temp_files`），worker 启动时清扫超 24h 的孤儿文件。
+- 临时执行脚本写入系统临时目录（`config.py` 的 `executions_dir` 指向 `tempfile.gettempdir()/atp_executions`）。**不要**改回 `backend/storage/`，否则 uvicorn `--reload` 会监听到运行文件导致服务自动重启、中断 WebSocket。运行文件带随机后缀（并发执行互不覆写）并在执行后即删（`runner.py` finally + `cleanup_execution_temp_files`），worker 启动时清扫超 24h 的孤儿文件。
 - 端口被占用或进程挂死：`lsof -ti:8000 | xargs kill -9` 后重启。
 - 验证后端是否正常：`curl http://127.0.0.1:8000/api/health`（响应含 `queue` 字段：available/depth/worker_alive）。
 - 不要在 `--reload` 进程外另跑连同一 MySQL 的一次性 asyncio 脚本做验证后遗留连接，异常退出可能拖垮开发服务器。
@@ -107,7 +106,7 @@ npm run test:unit  # vitest
 
 ## 4. 测试
 
-- 后端：`backend/tests/` 目前为空；requirements 已含 pytest + httpx（用于 `AsyncClient` 测试 FastAPI）。新增测试放此处。
+- 后端：`backend/tests/` 使用独立 SQLite、假 Redis/队列验证服务与 HTTP 路由；MCP 创作测试还包含真实 Chromium 和子进程试跑。运行 `python -m pytest tests/ -q`，新增测试放此处。
 - 前端：vitest 已配置（`vitest.config.ts`），运行 `npm run test:unit`。
 - 手工端到端验证路径：创建脚本 → 运行 → 检查执行面板实时日志与最终状态 → `GET /api/executions` 查看记录；数据源改动后用 curl 验证 `/api/datasources/{id}/...` 系列接口与前端工作台。
 
@@ -117,13 +116,40 @@ npm run test:unit  # vitest
 - 子进程执行超时由 `settings.script_execution_timeout`（默认 120s）控制，超时 kill。
 - 敏感值（secret 输入、variable/localStorage 类型全局变量）在前端列表中打码显示。
 - 数据源密码明文存平台库（本地单用户场景），但 `DatasourceOut` 不回传密码；对外接口不暴露密码。
-- 数据视图与 MCP `query_database` 仅允许只读语句白名单；外部取数 `GET /api/data/{slug}` 无鉴权，勿在视图 SQL 中暴露敏感数据。
+- 数据视图仅允许只读语句白名单；外部取数 `GET /api/data/{slug}` 无鉴权，勿在视图 SQL 中暴露敏感数据。
 - 用户代码可执行任意 Python，仅适用于本地单用户场景，勿暴露到公网。
 - CORS 仅允许 `http://localhost:5173` / `http://127.0.0.1:5173`（公共取数接口单独手动加 `Access-Control-Allow-Origin: *`）。
 
 ## 6. 配置
 
-- 后端配置集中在 `backend/app/config.py`（pydantic-settings），支持 `backend/.env` 覆盖（样例见 `.env.example`）。关键项：`headless`（浏览器是否无头）、`playwright_timeout`、`script_execution_timeout`、`sql_query_timeout`（30s）、`sql_max_rows`（1000）、`database_url`（MySQL DSN，默认 `mysql+aiomysql://root:helingfeng@127.0.0.1:3306/fishcode?charset=utf8mb4`，表级字符集 utf8mb4；注意 URL 驱动后缀必须是 `+aiomysql`，裸 `mysql://` 会去加载未安装的 MySQLdb）；执行队列：`redis_url`（默认 `redis://127.0.0.1:6379/0`，本机 `.env` 覆盖为 6390 独立实例）、`max_concurrent_executions`（默认 5）；数据采集：`cache_ttl_seconds`（30s）、`datasource_pool_size`/`datasource_max_overflow`（5/10）、`database_pool_size`/`database_max_overflow`（20/40，主库连接池仅 MySQL 方言生效）。
+- 后端配置集中在 `backend/app/config.py`（pydantic-settings），支持 `backend/.env` 覆盖（样例见 `.env.example`）。关键项：`headless`（浏览器是否无头）、`playwright_timeout`、`script_execution_timeout`、`sql_query_timeout`（30s）、`sql_max_rows`（1000）、`database_url`（MySQL DSN，默认 `mysql+aiomysql://root:helingfeng@127.0.0.1:3306/fishcode?charset=utf8mb4`，表级字符集 utf8mb4；注意 URL 驱动后缀必须是 `+aiomysql`，裸 `mysql://` 会去加载未安装的 MySQLdb）；执行队列：`redis_url`（默认 `redis://127.0.0.1:6379/0`，本机 `.env` 使用 6379 并配置认证）、`max_concurrent_executions`（默认 5）；数据采集：`cache_ttl_seconds`（30s）、`datasource_pool_size`/`datasource_max_overflow`（5/10）、`database_pool_size`/`database_max_overflow`（20/40，主库连接池仅 MySQL 方言生效）。
 - 平台主库为 MySQL（`fishcode`）：建表 DDL 在 `backend/mysql_ddl.sql`；SQLite 存量数据经 `backend/scripts/migrate_sqlite_to_mysql.py` 一次性迁入（MySQL 侧已有数据的表自动跳过）。`backend/storage/app.db` 为历史 SQLite 存量，不再被服务读写。引擎已带 `pool_pre_ping`/`pool_recycle=3600` 防 MySQL 长连接被 `wait_timeout` 掐断。
 - 前端 Vite 代理配置在 `frontend/vite.config.ts`：`/api` 代理需带 `ws: true`（WebSocket 日志推送依赖）。
-- 数据库/存储均在 `backend/storage/`（历史 app.db、scripts/）；`app/skills/` 目录预留存放 Skill 模板 JSON；`app/agent_skills/` 存放 MCP 配套 Agent Skills 文档。
+- 数据库/存储均在 `backend/storage/`（历史 app.db、scripts/）；`app/skills/` 目录预留存放 Skill 模板 JSON。
+
+## MCP 创作主路径（重构）
+
+- 最小入口 `app.mcp_main:app` 仅提供 MCP；`app.main:app` 为可选完整管理应用。
+- 连续探索逻辑在 `services/browser_authoring_service.py`，试跑在 `services/authoring_service.py`，工具只做协议适配。
+- `open_page` → `browse_page` → `preview_script` → `create_script/update_script` → `close_page`；运行规范全部内置 MCP，不依赖额外 Skills。
+- 试跑共用 runner 模板，无 Redis/worker，无持久执行记录；持久任务继续走队列。数据视图依赖仅持久任务支持。
+- 修改创作链路运行 `tests/test_mcp_authoring.py`（含真实 Chromium 测试）；接入和运行边界见 `README.md`。
+
+## 采集接口发布主路径
+
+- `models/collector.py` 的 `collectors` / `collector_tasks` 保存发布配置、应用授权与持久任务归属，后者不依赖调用日志；新增表已同步 mysql_ddl.sql。
+- `services/collector_service.py` 统一发布、参数契约、幂等提交、查询与数据分页；路由位于 `routers/collectors.py`，管理端 `/api/collectors`、`/api/collector-tasks`，外部 `/open/v1/collectors`、`/open/v1/tasks`，通过开放 router 注册。
+- 外部支持 Bearer `AppKey.AppSecret` 与原 HMAC；幂等键由 `Idempotency-Key` 指定，归属与 Execution 在同一事务内提交后入队。Task 列表不加载 outputs/inputs。
+- 前端 `/collectors` 发布与调试，`/collector-tasks` 数据查看，`/collection-portal` 为无管理导航的独立调用体验页（凭证仅存内存，所有请求走 /open）。Vite 已代理 /open。
+- 新任务归属不随清空日志丢失；旧版入口保留兼容但不做任务迁移。脚本更新会影响绑定接口，当前没有发布版本快照。更多边界见 docs/collector-platform.md。
+- MCP 通过 list_open_apps（不返回凭证）、list_published_collectors、publish_collector 支持用户明确要求的发布闭环；单纯脚本创作不自动发布。
+
+## 已移除的功能
+
+- 测试用例管理（含需求、模块、Markdown 导入与思维导图）及流程编排已删除，前后端路由、模型、服务与专用依赖均不再提供。
+- 不执行 DROP TABLE：旧库的历史表与执行记录原样保留，新库不再创建这些表。历史执行详情仍可读取；空间删除仅检查当前脚本。
+- worker 仅注册脚本任务；恢复时将非脚本 pending 执行标记为已停用并清理队列，禁止历史任务误执行成同 ID 的脚本。
+
+- 采集接口支持 DELETE /api/collectors/{id} 移除：collectors.archived 归档，enabled=false；列表和新调用排除归档接口，历史任务仍关联原记录。移除后释放脚本删除限制，但保留唯一 slug，禁止复用旧调用地址。已有数据库的 archived 列由 init_db 幂等补齐。
+
+- 接口代理模块已移除：不再提供 /api/open-apis 和 /open 通用转发，也不创建 open_apis 表；旧库中的历史规则保留但不会读取。开放服务仅提供明确注册的采集端点、应用和日志功能。

@@ -26,7 +26,9 @@ _KEY_PREFIX = "fk"
 async def get_open_apps(
     db: AsyncSession, skip: int = 0, limit: int = 100
 ) -> list[OpenApp]:
-    result = await db.execute(select(OpenApp).order_by(OpenApp.id.desc()).offset(skip).limit(limit))
+    result = await db.execute(
+        select(OpenApp).order_by(OpenApp.id.desc()).offset(skip).limit(limit)
+    )
     return result.scalars().all()
 
 
@@ -55,8 +57,13 @@ async def create_open_app(db: AsyncSession, app_in: OpenAppCreate) -> OpenApp:
     if not name:
         raise ValueError("应用名称不能为空")
     app_key, app_secret = _generate_credentials()
-    app = OpenApp(name=name, description=app_in.description, enabled=app_in.enabled,
-                  app_key=app_key, app_secret=app_secret)
+    app = OpenApp(
+        name=name,
+        description=app_in.description,
+        enabled=app_in.enabled,
+        app_key=app_key,
+        app_secret=app_secret,
+    )
     db.add(app)
     await db.commit()
     await db.refresh(app)
@@ -92,13 +99,30 @@ async def delete_open_app(db: AsyncSession, app: OpenApp) -> None:
     await db.commit()
 
 
-async def authenticate_request(db: AsyncSession, request: Request) -> tuple[OpenApp | None, str]:
+async def authenticate_request(
+    db: AsyncSession, request: Request
+) -> tuple[OpenApp | None, str]:
     """校验开放接口签名请求。返回 (app, "") 表示通过；(None, 错误原因) 表示拒绝。
 
     会消费 request body（供后续 handler 复用 request.state.body）。
     """
     body = await request.body()
     request.state.body = body
+
+    authorization = request.headers.get("Authorization", "")
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        key, separator, secret = token.partition(".")
+        if scheme.lower() != "bearer" or not separator:
+            return None, "Authorization 格式应为 Bearer <App Key>.<App Secret>"
+        app = await get_open_app_by_key(db, key)
+        if app is None or not hmac.compare_digest(
+            app.app_secret.encode(), secret.encode()
+        ):
+            return None, "应用凭证无效"
+        if not app.enabled:
+            return None, "应用已停用"
+        return app, ""
 
     app_key = request.headers.get("X-App-Key", "")
     timestamp = request.headers.get("X-Timestamp", "")
@@ -126,7 +150,10 @@ async def authenticate_request(db: AsyncSession, request: Request) -> tuple[Open
     ).hexdigest()
     if not hmac.compare_digest(expected, sign.strip().lower()):
         if request.url.query:
-            return None, "签名校验失败（query 不参与签名，请只对 path 签名，query 直接拼在 URL 上）"
+            return (
+                None,
+                "签名校验失败（query 不参与签名，请只对 path 签名，query 直接拼在 URL 上）",
+            )
         return None, "签名校验失败"
 
     return app, ""

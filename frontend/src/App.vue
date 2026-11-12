@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { RouterView, useRoute } from 'vue-router'
+const route = useRoute()
 import AppLayout from './components/AppLayout.vue'
 </script>
 
 <template>
-  <AppLayout>
+  <RouterView v-if="route.meta.publicPortal" />
+  <AppLayout v-else>
     <RouterView />
   </AppLayout>
 </template>

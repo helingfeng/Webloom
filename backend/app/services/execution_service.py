@@ -1,26 +1,18 @@
-from sqlalchemy import delete, func, select, and_, or_
+from sqlalchemy import delete, func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.engine.runner import cleanup_execution_temp_files
 from app.models.execution import Execution
 from app.models.script import Script
-from app.models.flow import Flow
 
 
 def _apply_workspace_filter(stmt, workspace_id: int | None):
-    """执行记录经多态关联（target_type/target_id）OR-join script/flow 按空间过滤"""
+    """按脚本所属空间过滤；未指定空间时仍可查看历史执行记录。"""
     if workspace_id is None:
         return stmt
-    return (
-        stmt.outerjoin(
-            Script,
-            and_(Execution.target_type == "script", Execution.target_id == Script.id),
-        )
-        .outerjoin(
-            Flow,
-            and_(Execution.target_type == "flow", Execution.target_id == Flow.id),
-        )
-        .where(or_(Script.workspace_id == workspace_id, Flow.workspace_id == workspace_id))
-    )
+    return stmt.join(
+        Script,
+        and_(Execution.target_type == "script", Execution.target_id == Script.id),
+    ).where(Script.workspace_id == workspace_id)
 
 
 async def get_executions(
@@ -35,7 +27,9 @@ async def get_executions(
         stmt = stmt.where(
             and_(Execution.target_type == "script", Execution.target_id == script_id)
         )
-    result = await db.execute(stmt.order_by(Execution.id.desc()).offset(skip).limit(limit))
+    result = await db.execute(
+        stmt.order_by(Execution.id.desc()).offset(skip).limit(limit)
+    )
     return result.scalars().all()
 
 

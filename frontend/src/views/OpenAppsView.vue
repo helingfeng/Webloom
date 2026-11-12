@@ -182,7 +182,7 @@ function handlePageChange() {
       :closable="false"
       show-icon
       style="margin-bottom: 20px"
-      title="为外部系统创建调用凭证（App Key + App Secret）。调用方使用签名方式访问开放接口（内置采集接口 + 管理端配置的代理接口），签名算法见「接入文档」。"
+      title="创建应用后，在「采集接口」授权该应用。调用方使用 Authorization: Bearer AppKey.AppSecret 发起采集并查询结果；完整调用凭证可在应用详情复制。"
     />
 
     <el-card v-loading="loading">
@@ -279,7 +279,9 @@ function handlePageChange() {
           </div>
         </el-form-item>
       </el-form>
+      <p style="color:#909399;font-size:13px">完整调用凭证格式为 App Key.App Secret，可粘贴到调用体验页，或在请求头中使用 Authorization: Bearer。</p>
       <template #footer>
+        <el-button type="primary" @click="copyText(`${credential.app_key}.${credential.app_secret}`)">复制完整调用凭证</el-button>
         <el-button @click="credentialVisible = false">关闭</el-button>
       </template>
     </el-dialog>

@@ -34,43 +34,6 @@ export interface OpenAppPage {
   total: number
 }
 
-export type OpenApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
-
-export interface OpenApiRoute {
-  id: number
-  name: string
-  method: OpenApiMethod
-  path: string
-  target_path: string
-  enabled: boolean
-  description: string
-  created_at: string
-  updated_at: string
-}
-
-export interface OpenApiRouteCreate {
-  name: string
-  method: OpenApiMethod
-  path: string
-  target_path: string
-  enabled: boolean
-  description: string
-}
-
-export interface OpenApiRouteUpdate {
-  name?: string
-  method?: OpenApiMethod
-  path?: string
-  target_path?: string
-  enabled?: boolean
-  description?: string
-}
-
-export interface OpenApiRoutePage {
-  items: OpenApiRoute[]
-  total: number
-}
-
 export interface OpenApiLog {
   id: number
   app_id: number | null

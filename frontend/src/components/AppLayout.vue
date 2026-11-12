@@ -23,9 +23,7 @@ interface MenuNode extends MenuLeaf {
 const menuItems: MenuNode[] = [
   { path: '/', label: '首页', icon: 'HomeFilled' },
   { path: '/scripts', label: '脚本管理', icon: 'Document' },
-  { path: '/flows', label: '流程编排', icon: 'Share' },
   { path: '/executions', label: '执行记录', icon: 'List' },
-  { path: '/test-cases', label: '测试用例管理', icon: 'Memo' },
   { path: '/workspaces', label: '项目空间', icon: 'Folder' },
   { path: '/global-variables', label: '全局变量', icon: 'Key' },
   { path: '/datasources', label: '数据源', icon: 'Coin' },
@@ -36,8 +34,9 @@ const menuItems: MenuNode[] = [
     label: '开放平台',
     icon: 'Platform',
     children: [
+      { path: '/collectors', label: '采集接口', icon: 'Connection' },
+      { path: '/collector-tasks', label: '采集任务与数据', icon: 'DataAnalysis' },
       { path: '/open-apps', label: '开放应用', icon: 'Avatar' },
-      { path: '/open-apis', label: '开放接口', icon: 'Connection' },
       { path: '/open-logs', label: '调用日志', icon: 'Tickets' },
       { path: '/open-docs', label: '接入文档', icon: 'Reading' },
     ],

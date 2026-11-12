@@ -5,6 +5,7 @@ import { useScriptStore } from '@/stores/scriptStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { listExecutions } from '@/api/executions'
+import { apiError } from '@/api/collectors'
 import ExecutionPanel from '@/components/ExecutionPanel.vue'
 import { formatDateTime } from '@/utils/format'
 import type { Execution } from '@/types/execution'
@@ -79,6 +80,7 @@ async function handleDelete(id: number) {
     ElMessage.success('删除成功')
   } catch (error) {
     if (error !== 'cancel') {
+      ElMessage.error(apiError(error))
       console.error(error)
     }
   }
@@ -170,7 +172,7 @@ async function handleBatchDelete() {
             {{ row.inputs?.length || 0 }} 个
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="320">
+        <el-table-column label="操作" width="410">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -180,6 +182,7 @@ async function handleBatchDelete() {
             >运行</el-button>
             <el-button size="small" @click="openExecDialog(row)">执行记录</el-button>
             <el-button size="small" @click="handleEdit(row.id)">编辑</el-button>
+            <el-button size="small" type="primary" plain @click="router.push({ path: '/collectors', query: { script_id: row.id } })">发布接口</el-button>
             <el-button size="small" type="danger" @click="handleDelete(row.id)">删除</el-button>
           </template>
         </el-table-column>

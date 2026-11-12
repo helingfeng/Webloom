@@ -85,8 +85,8 @@ async def test_pending_stale_reenqueued(sqlite_session_maker, monkeypatch):
                 _make_execution(status="pending", started_at=old),  # 超龄脚本 → 重入队
                 _make_execution(status="pending"),  # 刚创建 → 不动
                 _make_execution(
-                    status="pending", target_type="flow", started_at=old
-                ),  # 超龄流程 → 重入队
+                    status="pending", target_type="flow"
+                ),  # 历史流程 → 失败，不再入队
             ]
         )
         await session.commit()
@@ -95,22 +95,26 @@ async def test_pending_stale_reenqueued(sqlite_session_maker, monkeypatch):
             .scalars()
             .all()
         )
-        stale_script_id, fresh_id, stale_flow_id = rows[0].id, rows[1].id, rows[2].id
+        stale_script_id, fresh_id, retired_id = rows[0].id, rows[1].id, rows[2].id
 
     enqueued: list[tuple[int, str]] = []
 
     async def fake_script(eid, headless_override=None):
         enqueued.append((eid, "script"))
 
-    async def fake_flow(eid):
-        enqueued.append((eid, "flow"))
-
     monkeypatch.setattr(worker_mod, "enqueue_script_run", fake_script)
-    monkeypatch.setattr(worker_mod, "enqueue_flow_run", fake_flow)
 
-    await worker_mod.recover_pending(FakeRedis())
+    redis = FakeRedis()
+    await worker_mod.recover_pending(redis)
 
-    assert sorted(enqueued) == [(stale_script_id, "script"), (stale_flow_id, "flow")]
+    assert enqueued == [(stale_script_id, "script")]
+    assert f"arq:job:exec:{retired_id}" in redis.deleted
+    assert any(member == f"exec:{retired_id}" for _, member in redis.removed_jobs)
+    async with sqlite_session_maker() as session:
+        retired = await session.get(Execution, retired_id)
+        assert retired.status == "failed"
+        assert "已停用" in retired.logs
+        assert retired.finished_at is not None
     assert (fresh_id, "script") not in enqueued
 
 

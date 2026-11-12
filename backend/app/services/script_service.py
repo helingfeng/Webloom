@@ -1,6 +1,8 @@
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.engine.runner import validate_script_code
 from app.models.script import Script
+from app.models.collector import Collector
 from app.schemas.script import ScriptCreate, ScriptUpdate
 from app.services import workspace_service
 
@@ -27,6 +29,8 @@ async def _validate_workspace(db: AsyncSession, workspace_id: int) -> None:
 
 
 async def create_script(db: AsyncSession, script_in: ScriptCreate) -> Script:
+    if script_in.code.strip():
+        validate_script_code(script_in.code)
     await _validate_workspace(db, script_in.workspace_id)
     script = Script(**script_in.model_dump())
     db.add(script)
@@ -38,6 +42,8 @@ async def create_script(db: AsyncSession, script_in: ScriptCreate) -> Script:
 async def update_script(
     db: AsyncSession, script: Script, script_in: ScriptUpdate
 ) -> Script:
+    if script_in.code.strip():
+        validate_script_code(script_in.code)
     if script_in.workspace_id != script.workspace_id:
         await _validate_workspace(db, script_in.workspace_id)
     for key, value in script_in.model_dump().items():
@@ -48,6 +54,7 @@ async def update_script(
 
 
 async def delete_script(db: AsyncSession, script: Script) -> None:
+    await _ensure_not_published(db, [script.id])
     await db.delete(script)
     await db.commit()
 
@@ -58,7 +65,20 @@ async def batch_delete(db: AsyncSession, ids: list[int]) -> int:
     missing = [i for i in ids if i not in existing]
     if missing:
         raise ValueError(f"脚本不存在：{', '.join(str(i) for i in missing)}")
+    await _ensure_not_published(db, list(existing))
     unique_ids = list(existing)
     await db.execute(delete(Script).where(Script.id.in_(unique_ids)))
     await db.commit()
     return len(unique_ids)
+
+
+async def _ensure_not_published(db: AsyncSession, ids: list[int]) -> None:
+    bound = (
+        await db.execute(
+            select(Collector.name)
+            .where(Collector.script_id.in_(ids), Collector.archived.is_(False))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if bound:
+        raise ValueError(f"脚本已绑定采集接口「{bound}」，请先在接口中更换脚本")

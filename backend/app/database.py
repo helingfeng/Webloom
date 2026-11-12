@@ -66,6 +66,14 @@ async def init_db() -> None:
                             "ALTER TABLE `scripts` ADD COLUMN headless BOOLEAN DEFAULT 1"
                         )
                     )
+            if "collectors" in inspector.get_table_names():
+                columns = {c["name"] for c in inspector.get_columns("collectors")}
+                if "archived" not in columns:
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE `collectors` ADD COLUMN `archived` BOOLEAN NOT NULL DEFAULT 0"
+                        )
+                    )
             if "global_variables" in inspector.get_table_names():
                 columns = {c["name"] for c in inspector.get_columns("global_variables")}
                 if "domain" not in columns:
@@ -87,7 +95,7 @@ async def init_db() -> None:
                             "VALUES ('默认空间', '系统迁移自动创建', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                         )
                     )
-                for table in ("scripts", "flows"):
+                for table in ("scripts",):
                     if table in inspector.get_table_names():
                         columns = {c["name"] for c in inspector.get_columns(table)}
                         if "workspace_id" not in columns:
@@ -125,22 +133,6 @@ async def init_db() -> None:
                         text(
                             "ALTER TABLE `data_views` ADD COLUMN `database` VARCHAR(255) DEFAULT ''"
                         )
-                    )
-            # ---- flows 运行配置迁移（幂等）----
-            if "flows" in inspector.get_table_names():
-                columns = {c["name"] for c in inspector.get_columns("flows")}
-                if "run_mode" not in columns:
-                    sync_conn.execute(
-                        text(
-                            "ALTER TABLE `flows` ADD COLUMN run_mode VARCHAR(16) DEFAULT 'manual'"
-                        )
-                    )
-                if "global_inputs" not in columns:
-                    sync_conn.execute(
-                        text("ALTER TABLE `flows` ADD COLUMN global_inputs JSON")
-                    )
-                    sync_conn.execute(
-                        text("UPDATE `flows` SET global_inputs = '{}' WHERE global_inputs IS NULL")
                     )
 
         await conn.run_sync(_migrate)

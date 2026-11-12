@@ -66,7 +66,10 @@ async def update_script(
 @router.delete("/{script_id}", status_code=204)
 async def delete_script(script_id: int, db: AsyncSession = Depends(get_db)) -> None:
     script = await _get_script_or_404(db, script_id)
-    await script_service.delete_script(db, script)
+    try:
+        await script_service.delete_script(db, script)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/batch-delete", response_model=BatchDeleteOut)
@@ -93,6 +96,8 @@ async def run_script_endpoint(
             inputs=request.inputs or {},
             headless=script.headless if request.headless is None else request.headless,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except QueueUnavailableError:
         raise HTTPException(
             status_code=503,

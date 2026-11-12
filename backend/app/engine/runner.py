@@ -1,4 +1,5 @@
 import asyncio
+import ast
 import json
 import os
 import sys
@@ -98,6 +99,36 @@ if __name__ == "__main__":
 '''
 
 
+def render_script_code(code: str, headless: bool = True) -> str:
+    return (
+        SCRIPT_TEMPLATE.replace("__HEADLESS__", str(headless))
+        .replace("__TIMEOUT__", str(settings.playwright_timeout))
+        .replace(
+            "__USER_CODE__", "\n".join("        " + line for line in code.splitlines())
+        )
+    )
+
+
+def validate_script_code(code: str) -> dict:
+    """编译真实运行模板，能发现顶层 await、缩进以及 return 等上下文错误。"""
+    if not code.strip():
+        raise ValueError("脚本代码不能为空")
+    try:
+        compile(render_script_code(code), "<fishcode-script>", "exec")
+    except SyntaxError as exc:
+        offset = SCRIPT_TEMPLATE.splitlines().index("__USER_CODE__")
+        line = max(1, (exc.lineno or 1) - offset)
+        raise ValueError(f"代码第 {line} 行: {exc.msg}") from exc
+    tree = ast.parse(
+        "async def main():\n" + "\n".join("    " + line for line in code.splitlines())
+    )
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    return {
+        "valid": True,
+        "uses_data_views": bool(names & {"DATA_VIEWS", "DATA_VIEWS_ONE"}),
+    }
+
+
 class ScriptExecutionError(RuntimeError):
     """脚本执行失败，携带子进程完整日志（含 traceback / 断言原因）"""
 
@@ -164,7 +195,9 @@ async def run_script(
     await db.refresh(execution)
 
     try:
-        logs, outputs = await execute_script_code(script, inputs, execution.id, log_callback)
+        logs, outputs = await execute_script_code(
+            script, inputs, execution.id, log_callback
+        )
         execution.status = "success"
         execution.logs = logs
         execution.outputs = outputs
@@ -172,7 +205,9 @@ async def run_script(
         execution.status = "failed"
         detail_logs = getattr(exc, "logs", "") or ""
         error_msg = f"Error: {exc}"
-        execution.logs = f"{detail_logs}\n{error_msg}".strip() if detail_logs else error_msg
+        execution.logs = (
+            f"{detail_logs}\n{error_msg}".strip() if detail_logs else error_msg
+        )
         execution.outputs = {}
         if log_callback:
             log_callback(error_msg)
@@ -195,6 +230,7 @@ async def execute_script_code(
     global_cookies: list[dict] | None = None,
     data_views: dict | None = None,
     headless: bool | None = None,
+    capture_frames: bool = True,
 ) -> tuple[str, dict]:
     # 未显式指定时回退到全局配置（默认无窗口）
     if headless is None:
@@ -221,17 +257,8 @@ async def execute_script_code(
     else:
         merged_cookies = list(global_cookies or [])
 
-    indented_code = "\n".join(
-        "        " + line for line in script.code.splitlines()
-    )
-    full_code = (
-        SCRIPT_TEMPLATE
-        .replace("__HEADLESS__", "True" if headless else "False")
-        .replace("__TIMEOUT__", str(timeout))
-        .replace("__USER_CODE__", indented_code)
-    )
-
-    run_file = settings.executions_dir / f"run_{execution_id}.py"
+    full_code = render_script_code(script.code, headless)
+    run_file = settings.executions_dir / f"run_{execution_id}_{uuid.uuid4().hex}.py"
     run_file.write_text(full_code, encoding="utf-8")
 
     env = {
@@ -245,7 +272,11 @@ async def execute_script_code(
         "ATP_DATA_VIEWS": json.dumps(data_views or {}),
         "ATP_START_URL": script.start_url or "",
         # 实时画面：模板内 CDP screencast 持续截帧写入该文件，供前端轮询展示
-        "ATP_FRAME_FILE": str(settings.executions_dir / f"frame_{execution_id}.jpg"),
+        "ATP_FRAME_FILE": (
+            str(settings.executions_dir / f"frame_{execution_id}.jpg")
+            if capture_frames
+            else ""
+        ),
         "PYTHONUNBUFFERED": "1",
     }
 
@@ -285,9 +316,12 @@ async def execute_script_code(
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            raise ScriptExecutionError(
-                "Script execution timed out", "".join(logs)
-            )
+            raise ScriptExecutionError("Script execution timed out", "".join(logs))
+
+        except asyncio.CancelledError:
+            process.kill()
+            await process.wait()
+            raise
 
         return_code = await process.wait()
         full_logs = "".join(logs)
@@ -325,4 +359,3 @@ def _parse_outputs(text: str) -> dict:
             except json.JSONDecodeError:
                 return {"_raw_output": json_str}
     return {}
-

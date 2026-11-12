@@ -1,10 +1,6 @@
 import client from './client'
 import type {
   OpenApiLogPage,
-  OpenApiRoute,
-  OpenApiRouteCreate,
-  OpenApiRoutePage,
-  OpenApiRouteUpdate,
   OpenApp,
   OpenAppCreate,
   OpenAppDetail,
@@ -37,24 +33,6 @@ export function regenerateOpenAppSecret(id: number) {
 
 export function deleteOpenApp(id: number) {
   return client.delete(`/open-apps/${id}`)
-}
-
-// ---------- 开放接口（代理规则）----------
-
-export function listOpenApis(skip = 0, limit = 100) {
-  return client.get<OpenApiRoutePage>('/open-apis', { params: { skip, limit } })
-}
-
-export function createOpenApi(data: OpenApiRouteCreate) {
-  return client.post<OpenApiRoute>('/open-apis', data)
-}
-
-export function updateOpenApi(id: number, data: OpenApiRouteUpdate) {
-  return client.put<OpenApiRoute>(`/open-apis/${id}`, data)
-}
-
-export function deleteOpenApi(id: number) {
-  return client.delete(`/open-apis/${id}`)
 }
 
 // ---------- 调用日志 ----------

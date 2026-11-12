@@ -1,22 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { getMcpStatus, listAgentSkills, getAgentSkill, getSkillsInstallInfo } from '@/api/mcp'
-import type {
-  AgentSkillDetail,
-  AgentSkillSummary,
-  McpStatus,
-  SkillInstallInfo,
-} from '@/types/mcp'
+import { getMcpStatus } from '@/api/mcp'
+import type { McpStatus } from '@/types/mcp'
 import { ElMessage } from 'element-plus'
 
 const status = ref<McpStatus | null>(null)
-const skills = ref<AgentSkillSummary[]>([])
-const installInfo = ref<SkillInstallInfo | null>(null)
 const loading = ref(false)
-
-const skillDialogVisible = ref(false)
-const currentSkill = ref<AgentSkillDetail | null>(null)
-const skillLoading = ref(false)
 
 const configJson = computed(() =>
   status.value ? JSON.stringify(status.value.client_config.mcp_servers_json, null, 2) : ''
@@ -29,14 +18,8 @@ onMounted(() => {
 async function fetchData() {
   loading.value = true
   try {
-    const [statusRes, skillsRes, installRes] = await Promise.all([
-      getMcpStatus(),
-      listAgentSkills(),
-      getSkillsInstallInfo(),
-    ])
+    const statusRes = await getMcpStatus()
     status.value = statusRes.data
-    skills.value = skillsRes.data
-    installInfo.value = installRes.data
   } catch (error: any) {
     const detail = error?.response?.data?.detail
     ElMessage.error(typeof detail === 'string' ? detail : '获取 MCP 服务状态失败')
@@ -55,19 +38,6 @@ async function copyText(text: string) {
   }
 }
 
-async function viewSkill(name: string) {
-  skillDialogVisible.value = true
-  skillLoading.value = true
-  try {
-    const res = await getAgentSkill(name)
-    currentSkill.value = res.data
-  } catch (error: any) {
-    ElMessage.error('获取 Skill 内容失败')
-    console.error(error)
-  } finally {
-    skillLoading.value = false
-  }
-}
 </script>
 
 <template>
@@ -82,7 +52,7 @@ async function viewSkill(name: string) {
       :closable="false"
       show-icon
       style="margin-bottom: 20px"
-      title="脚本管理已封装为 MCP（Model Context Protocol）服务，AI 客户端（Claude Code / Cursor 等）可通过下方端点连接，使用配套 Skills 即可完成脚本的查询、编写、运行与维护。"
+      title="AgentHarness 连接 MCP 后即可探索网页、编写并保存采集脚本、运行验证。编写规范已内置在 MCP，无需单独安装 Skills。"
     />
 
     <el-card v-if="status" style="margin-bottom: 20px">
@@ -134,55 +104,16 @@ async function viewSkill(name: string) {
     </el-card>
 
     <el-card>
-      <template #header><span>Agent Skills</span></template>
-      <el-table :data="skills" style="width: 100%">
-        <el-table-column prop="name" label="名称" width="200" />
-        <el-table-column prop="description" label="说明" show-overflow-tooltip />
-        <el-table-column label="操作" width="100">
-          <template #default="{ row }">
-            <el-button size="small" @click="viewSkill(row.name)">查看</el-button>
-          </template>
-        </el-table-column>
-        <template #empty>暂无 Skills</template>
-      </el-table>
-
-      <template v-if="installInfo">
-        <h4 class="section-title" style="margin-top: 16px">安装到客户端</h4>
-        <p class="hint-text">
-          Skills 源目录：<code class="endpoint">{{ installInfo.source_dir }}</code
-          >，格式为 <code class="endpoint">&lt;name&gt;/SKILL.md</code>，Claude Code 与 Trae CLI
-          通用；将各 skill 目录复制到客户端对应 skills 目录即可被自动发现（或 /名称 手动调用）。
-        </p>
-        <el-table :data="installInfo.clients" style="width: 100%">
-          <el-table-column prop="client" label="客户端" width="140" />
-          <el-table-column label="安装目录" width="320">
-            <template #default="{ row }">
-              <div>用户级：<code class="endpoint">{{ row.user_dir }}</code></div>
-              <div>项目级：<code class="endpoint">{{ row.project_dir }}</code></div>
-            </template>
-          </el-table-column>
-          <el-table-column label="一键安装（用户级）">
-            <template #default="{ row }">
-              <div class="install-row">
-                <pre class="code-block install-cmd">{{ row.command }}</pre>
-                <el-button size="small" @click="copyText(row.command)">复制</el-button>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-      </template>
+      <template #header><span>脚本创作闭环</span></template>
+      <el-steps :active="4" finish-status="success" simple>
+        <el-step title="list_workspaces 选择空间" />
+        <el-step title="inspect_page 探索页面" />
+        <el-step title="create_script 保存脚本" />
+        <el-step title="run_script 执行" />
+        <el-step title="get_execution 读取结果" />
+      </el-steps>
+      <p class="hint-text">MCP 工具说明包含 Playwright 代码约定、登录态注入方式和采集稳定性建议。</p>
     </el-card>
-
-    <el-dialog
-      v-model="skillDialogVisible"
-      :title="currentSkill?.name || 'Skill 内容'"
-      width="720px"
-      top="6vh"
-    >
-      <div v-loading="skillLoading">
-        <pre v-if="currentSkill" class="skill-content">{{ currentSkill.content }}</pre>
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -251,29 +182,4 @@ async function viewSkill(name: string) {
   line-height: 1.8;
 }
 
-.install-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.install-cmd {
-  flex: 1;
-  margin: 0;
-}
-
-.skill-content {
-  background-color: #f5f7fa;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  padding: 16px;
-  margin: 0;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 65vh;
-  overflow-y: auto;
-}
 </style>

@@ -35,8 +35,6 @@ class Settings(BaseSettings):
     # ---- 开放平台 ----
     # 开放接口签名时间窗（秒），X-Timestamp 与服务器时间偏差超过该值拒绝
     open_api_sign_ttl_seconds: int = 300
-    # 代理接口转发目标（平台自身 API 地址）
-    open_api_internal_base_url: str = "http://127.0.0.1:8000"
 
     class Config:
         env_file = ".env"

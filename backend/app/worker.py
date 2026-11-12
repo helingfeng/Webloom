@@ -1,4 +1,4 @@
-"""arq worker 入口：实际执行脚本/流程任务。
+"""arq worker 入口：实际执行采集脚本任务。
 
 启动：``cd backend && ./venv/bin/arq app.worker.WorkerSettings``（无 --reload，改代码需手动重启）。
 
@@ -15,19 +15,18 @@ from datetime import datetime, timedelta
 from arq import constants as arq_constants
 from arq import func
 from arq.connections import RedisSettings
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from app.config import settings
 from app.database import AsyncSessionLocal, init_db
 from app.engine.runner import cleanup_execution_temp_files
 from app.models.execution import Execution
-from app.services import flow_service, script_run_service
+from app.services import script_run_service
 from app.services.datasource_query_service import connection_manager
 from app.task_queue import (
     HEARTBEAT_INTERVAL,
     HEARTBEAT_TTL,
     WORKER_HEARTBEAT_KEY,
-    enqueue_flow_run,
     enqueue_script_run,
     job_key,
 )
@@ -42,10 +41,6 @@ async def run_script_execution(
     return await script_run_service.run_script_execution(
         execution_id, headless_override
     )
-
-
-async def run_flow_execution(ctx: dict, execution_id: int) -> dict:
-    return await flow_service.run_flow_execution(execution_id)
 
 
 def cleanup_orphan_files(max_age_seconds: int = ORPHAN_FILE_MAX_AGE) -> None:
@@ -101,22 +96,38 @@ async def recover_interrupted(redis) -> None:
 
 
 async def recover_pending(redis) -> None:
-    """兜底重入队：pending 超龄的执行重新入队（_job_id 幂等，已在队列/执行中的自动去重）"""
+    """超龄脚本重入队；已停用类型的遗留任务落失败状态并移出队列。"""
     cutoff = datetime.now() - timedelta(seconds=PENDING_REENQUEUE_MIN_AGE)
+    retired_ids: list[int] = []
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Execution).where(
-                Execution.status == "pending", Execution.started_at < cutoff
+                Execution.status == "pending",
+                or_(Execution.target_type != "script", Execution.started_at < cutoff),
             )
         )
-        targets = [(e.id, e.target_type) for e in result.scalars().all()]
-
-    for execution_id, target_type in targets:
-        try:
-            if target_type == "flow":
-                await enqueue_flow_run(execution_id)
+        script_ids: list[int] = []
+        for execution in result.scalars().all():
+            if execution.target_type == "script":
+                script_ids.append(execution.id)
             else:
-                await enqueue_script_run(execution_id)
+                execution.status = "failed"
+                execution.logs = (
+                    execution.logs or ""
+                ) + "Error: 该执行类型已停用，任务不会再执行\n"
+                execution.finished_at = datetime.now()
+                retired_ids.append(execution.id)
+        await session.commit()
+
+    for execution_id in retired_ids:
+        try:
+            await redis.zrem(arq_constants.default_queue_name, f"exec:{execution_id}")
+            await redis.delete(job_key(execution_id))
+        except Exception:
+            pass  # 数据库终态已经阻止再次执行，Redis 残留交由队列清理。
+    for execution_id in script_ids:
+        try:
+            await enqueue_script_run(execution_id)
         except Exception:
             continue  # Redis 不可用时下轮心跳重试
 
@@ -137,6 +148,7 @@ async def _heartbeat(ctx: dict) -> None:
 async def on_startup(ctx: dict) -> None:
     await init_db()
     await recover_interrupted(ctx["redis"])
+    await recover_pending(ctx["redis"])
     cleanup_orphan_files()
     ctx["heartbeat_task"] = asyncio.create_task(_heartbeat(ctx))
 
@@ -154,7 +166,6 @@ class WorkerSettings:
 
     functions = [
         func(run_script_execution, max_tries=1),
-        func(run_flow_execution, max_tries=1),
     ]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     max_jobs = settings.max_concurrent_executions

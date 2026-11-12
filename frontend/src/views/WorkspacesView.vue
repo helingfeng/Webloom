@@ -91,7 +91,7 @@ async function handleDelete(id: number) {
       :closable="false"
       show-icon
       style="margin-bottom: 20px"
-      title="项目空间用于隔离脚本与流程。左侧切换空间后，脚本管理、流程编排、执行记录与首页统计均按当前空间过滤；空间下仍有内容时不可删除。"
+      title="项目空间用于组织采集脚本。左侧切换空间后，脚本管理、执行记录与首页脚本统计按当前空间过滤；空间下仍有脚本时不可删除。"
     />
 
     <el-card v-loading="wsStore.loading">

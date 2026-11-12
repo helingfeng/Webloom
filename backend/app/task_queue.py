@@ -78,19 +78,6 @@ async def enqueue_script_run(
         raise QueueUnavailableError(f"任务队列不可用：{exc}") from exc
 
 
-async def enqueue_flow_run(execution_id: int) -> None:
-    try:
-        pool = await get_pool()
-        await pool.enqueue_job(
-            "run_flow_execution", execution_id, _job_id=_job_id(execution_id)
-        )
-    except QueueUnavailableError:
-        raise
-    except Exception as exc:
-        await _drop_broken_pool(exc)
-        raise QueueUnavailableError(f"任务队列不可用：{exc}") from exc
-
-
 async def _drop_broken_pool(exc: Exception) -> None:
     """连接类异常时丢弃缓存池，下次入队重建（Redis 重启后自愈）"""
     from redis.exceptions import ConnectionError as RedisConnectionError

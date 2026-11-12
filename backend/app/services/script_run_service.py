@@ -7,13 +7,17 @@
 
 import asyncio
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
 from app.engine.mock_generator import generate_mock_inputs
-from app.engine.runner import cleanup_execution_temp_files, execute_script_code
+from app.engine.runner import (
+    cleanup_execution_temp_files,
+    execute_script_code,
+    validate_script_code,
+)
 from app.models.execution import Execution
 from app.models.script import Script
 from app.services import (
@@ -33,12 +37,19 @@ async def start_script_execution(
     mode: Literal["manual", "mock"] = "manual",
     inputs: dict[str, Any] | None = None,
     headless: bool | None = None,
+    on_created: Callable[[Execution], None] | None = None,
 ) -> Execution:
     """创建 pending 状态 Execution 并入队，立即返回。
 
     队列不可用（Redis 未启动）时抛 QueueUnavailableError，该执行留痕为 failed。
     """
-    user_inputs = inputs or {}
+    validate_script_code(script.code)
+    user_inputs = {
+        d["name"]: d["default"]
+        for d in (script.inputs or [])
+        if d.get("default") is not None
+    }
+    user_inputs.update(inputs or {})
     execution = Execution(
         target_type="script",
         target_id=script.id,
@@ -50,6 +61,9 @@ async def start_script_execution(
         started_at=datetime.now(),
     )
     db.add(execution)
+    await db.flush()
+    if on_created is not None:
+        on_created(execution)
     await db.commit()
     await db.refresh(execution)
 
@@ -76,6 +90,13 @@ async def run_script_execution(
         execution = await execution_service.get_execution(session, execution_id)
         if execution is None or execution.status != "pending":
             return {"status": execution.status if execution else "missing"}
+
+        if execution.target_type != "script":
+            execution.status = "failed"
+            execution.logs = (execution.logs or "") + "Error: 该执行类型已停用\n"
+            execution.finished_at = datetime.now()
+            await session.commit()
+            return {"status": execution.status}
 
         bus = ExecutionLogBus(execution_id)
         await bus.start()
@@ -107,7 +128,11 @@ async def run_script_execution(
             else:
                 headers, gvars, local_storage, cookies = {}, {}, {}, []
 
-            view_data = await data_view_service.collect_view_data_cached(session)
+            view_data = (
+                await data_view_service.collect_view_data_cached(session)
+                if validate_script_code(script.code)["uses_data_views"]
+                else {}
+            )
 
             _, outputs = await execute_script_code(
                 script,
