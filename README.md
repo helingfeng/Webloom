@@ -10,14 +10,16 @@
 
 ## 开源说明与贡献
 
-项目源码：[helingfeng/FishCode](https://github.com/helingfeng/FishCode)。欢迎交流使用经验、反馈问题，一起完善 Webloom。
+项目源码：[helingfeng/Webloom](https://github.com/helingfeng/Webloom)。欢迎交流使用经验、反馈问题，一起完善 Webloom。
 
-- 问题反馈与功能建议：请提交 [Issue](https://github.com/helingfeng/FishCode/issues)，附上复现步骤、版本和已脱敏的错误信息。
-- 代码与文档贡献：欢迎提交 [Pull Request](https://github.com/helingfeng/FishCode/pulls)，说明改动目的和验证结果；开发约定见 [AGENTS.md](AGENTS.md)。
+- 问题反馈与功能建议：请提交 [Issue](https://github.com/helingfeng/Webloom/issues)，附上复现步骤、版本和已脱敏的错误信息。
+- 代码与文档贡献：欢迎提交 [Pull Request](https://github.com/helingfeng/Webloom/pulls)，说明改动目的和验证结果；开发约定见 [AGENTS.md](AGENTS.md)。
 - 提交内容请勿包含账号密码、Cookie、Token、授权密钥或真实业务数据；截图和示例使用演示数据。
-- 开源许可证：当前仓库尚未添加 `LICENSE` 文件，许可证待明确。第三方组件的许可证和授权要求请查看其各自项目说明。
+- 开源许可证：本项目采用 [MIT License](LICENSE)，允许依许可证使用、修改和分发，包括商业用途；请保留版权及许可声明。第三方组件遵循各自的许可证和授权要求。
 
 ## 合法使用与责任声明
+
+以下为负责任使用提醒，不构成 MIT 许可证的附加授权条件。
 
 Webloom 是通用网页数据采集工具，仅用于合法、获得授权的数据采集、开发测试和研究。使用前请确认目标网站的访问规则、授权范围和数据使用条件，并遵守适用法律法规。源码公开不代表已获得任何目标网站或数据权利人的授权。
 
