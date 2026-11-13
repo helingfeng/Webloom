@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    app_name: str = "小鱼"
+    app_name: str = "采织 Webloom"
     database_url: str = (
         "mysql+aiomysql://root:helingfeng@127.0.0.1:3306/fishcode?charset=utf8mb4"
     )

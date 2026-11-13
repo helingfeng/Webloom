@@ -33,6 +33,27 @@ async def get_global_variable(db: AsyncSession, var_id: int) -> GlobalVariable |
     return await db.get(GlobalVariable, var_id)
 
 
+async def list_matching_global_variables(
+    db: AsyncSession,
+    domain: str | None = None,
+    kind: str | None = None,
+    enabled: bool | None = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> tuple[list[GlobalVariable], int]:
+    """按目标域筛选（包含通用/父域），兼容历史 URL/大小写域名写法。"""
+    target = normalize_domain(domain) if domain is not None else None
+    rows = await get_global_variables(db)
+    matched = [
+        row for row in rows
+        if (target is None or _domain_matches(row.domain or "", target))
+        and (kind is None or row.type == kind)
+        and (enabled is None or row.enabled == enabled)
+    ]
+    start = max(skip, 0)
+    return matched[start:start + min(max(limit, 1), 100)], len(matched)
+
+
 async def _validate(
     db: AsyncSession, data: dict, exclude_id: int | None = None
 ) -> dict:

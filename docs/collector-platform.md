@@ -50,8 +50,8 @@ curl -X POST 'http://127.0.0.1:8000/open/v1/collectors/product-search/runs' \
 
 新版接入统一使用本指南中的 `/open/v1/collectors` 与 `/open/v1/tasks`。平台保留的兼容功能不在此指南中作为新接入方案。开发实现与内部模块约定见 [AGENTS.md](../AGENTS.md)。
 
-## MCP 发布闭环
+## 发布入口
 
-AgentHarness 可以使用 `list_open_apps` 获取应用 ID（不含密钥）、`list_published_collectors` 检查已有接口、`publish_collector` 将已验证脚本发布或更新接口。完整工具调用规范内置 MCP instructions，不需要额外 Skills。只有用户要求对外提供接口时才发布，单纯创作脚本不会自动开放。
+AgentHarness 通过 MCP 完成脚本创作、验证和保存。采集接口发布或更新、开放应用管理和授权配置在管理后台完成，MCP 不提供发布平台相关工具。
 
-本机示例「网页标题与链接」的接口标识为 `page-summary-demo`，授权给「采集接口示例应用」。可在应用详情复制凭证，通过调用体验页提交网页 URL；新部署环境请替换为自己已发布的接口标识和实际输入参数。
+完整的图文操作示例见 [README 上手示例](../README.md#上手示例采集图书目录并发布接口)。文档中的 `book-catalog` 是示例标识，需在自己的平台先创建应用、选择脚本并发布；不会随服务启动自动创建。

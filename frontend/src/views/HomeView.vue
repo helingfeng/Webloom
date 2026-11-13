@@ -7,6 +7,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { listCollectors } from '@/api/collectors'
 import { ElMessage } from 'element-plus'
 import { apiError } from '@/api/collectors'
+import BrandIdentity from '@/components/BrandIdentity.vue'
 
 const router = useRouter()
 const scriptStore = useScriptStore()
@@ -32,7 +33,10 @@ function navigateTo(path: string) { router.push(path) }
 
 <template>
   <div>
-    <h1>小鱼</h1>
+    <div class="welcome">
+      <h1><BrandIdentity :size="64" /></h1>
+      <p class="tagline">让网页信息，织成可用数据。</p>
+    </div>
     <p class="subtitle">
       通过 MCP 创作采集脚本，发布对外接口，查看采集任务与结果数据。
       <el-tag v-if="wsStore.currentWorkspace" size="small" style="margin-left: 8px">
@@ -73,11 +77,14 @@ function navigateTo(path: string) { router.push(path) }
 </template>
 
 <style scoped>
+.welcome { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; margin: 8px 0 20px; }
+.welcome h1 { margin: 0; line-height: 1; }
+.tagline { color: #507368; font-size: 18px; letter-spacing: .03em; }
 .subtitle { color: #666; margin-bottom: 30px; }
 .stats-row { margin-bottom: 30px; }
 .stat-card { text-align: center; cursor: pointer; transition: transform 0.2s; }
 .stat-card:hover { transform: translateY(-5px); }
-.stat-icon { font-size: 40px; color: #409eff; margin-bottom: 10px; }
+.stat-icon { font-size: 40px; color: var(--el-color-primary); margin-bottom: 10px; }
 .stat-number { font-size: 32px; font-weight: bold; color: #333; }
 .stat-label { color: #666; margin-top: 5px; }
 .quick-actions .el-button { margin: 0 15px 8px 0; }

@@ -1,11 +1,17 @@
-# 小鱼（fishCode）
+<img src="frontend/public/brand-mark.svg" width="72" height="72" alt="采织 Webloom Logo" />
+
+# 采织 Webloom
+
+**让网页信息，织成可用数据。**
+
+“采”是采集，“织”是将零散信息组织成可复用的数据。Webloom 取自 Web 与 Loom（织机），Logo 以三条交织的信息线汇成整齐的数据单元，表达从网页到结构化数据的过程。
 
 以 MCP 为主入口的网页数据采集平台：AgentHarness 根据提示词探索网页、编写和验证 Playwright Python 脚本，保存后可发布成对外采集接口。脚本创作规范内置 MCP，无需额外 Skills。
 
 ## 使用流程
 
 1. AgentHarness 连接 `http://127.0.0.1:8000/mcp`，完成页面探索、脚本试跑和保存。
-2. 在脚本列表点击「发布接口」，选择授权应用并设置稳定的接口标识。
+2. 在后台创建开放应用，再从脚本列表点击「发布接口」，选择授权应用并设置稳定的接口标识。
 3. 外部系统使用 Bearer 凭证调用接口，查询任务结果并分页读取数据。
 4. 在平台查看采集状态、失败原因、执行日志和结果表格，导出 CSV 或 JSON。
 
@@ -20,6 +26,8 @@
 | `/collection-portal` | 独立调用体验页：输入凭证后调用获授权接口 |
 
 完整的外部调用契约见 [采集接口接入指南](docs/collector-platform.md)。开发分层、执行引擎、数据源及原有管理功能见 [AGENTS.md](AGENTS.md)。
+
+第一次使用可先完成下方[图文上手示例](#上手示例采集图书目录并发布接口)。只需要 AI 创作脚本时，完成示例的前两步即可；发布和外部调用按需使用。
 
 ## 环境与安装
 
@@ -82,12 +90,135 @@ cd backend
 此入口与完整后端二选一使用同一端口。AgentHarness 配置：
 
 ```json
-{"mcpServers":{"fishcode-scripts":{"url":"http://127.0.0.1:8000/mcp"}}}
+{"mcpServers":{"webloom":{"url":"http://127.0.0.1:8000/mcp"}}}
 ```
 
 创作链路为 `open_page` / `browse_page` → `preview_script` → `create_script` / `update_script` → `close_page`。探索会话最多 4 个，空闲 10 分钟回收；试跑使用独立浏览器，代码须包含完整导航与采集步骤。启动单个 MCP 进程，避免会话分散。
 
-用户要求发布接口时，Agent 可用 `list_open_apps`、`list_published_collectors`、`publish_collector` 完成发布，不经 MCP 回传应用密钥。`run_script` 和已发布接口的持久任务仍需 Redis 与 worker；使用 DATA_VIEWS 的脚本也通过持久任务验证。
+采集接口发布、开放应用与授权配置通过管理后台完成，MCP 仅提供脚本创作、验证、执行和全局变量管理。`run_script` 和已发布接口的持久任务仍需 Redis 与 worker；使用 DATA_VIEWS 的脚本也通过持久任务验证。
+
+MCP 可直接管理全局变量与用户提供的登录态，无需额外 Skills：
+
+- `list_global_variables(domain, type, enabled, skip, limit)` 返回 `{items,total}` 元数据与 `has_value`，不含明文；domain 支持目标 URL，筛选包含通用/父域配置，limit 上限 100。
+- `create_global_variable(name, value, type, domain, ...)` 保存单个 Cookie、Header、localStorage 项或普通变量；先列表查重，同类型/名称/域名项通过更新替换。
+- `update_global_variable(var_id, ...)` 部分更新；未传 value 保留，空字符串清空，`enabled=false` 停用但保留值。
+- `delete_global_variable(var_id)` 删除配置，重复删除安全。
+
+Cookie 用 `type="cookie"`，Authorization 用 `type="header"`，浏览器存储用 `type="localStorage"`；`variable` 仅注入 `GLOBAL_VARS`，不会自动登录。登录态应绑定具体 domain，避免留空对所有站点生效；凭证只放 value，不写脚本、默认值、备注或输出。所有 MCP 列表/写入结果均不含 value，不提供明文读取工具。保存后新探索会话、试跑与继承全局变量的任务自动注入；已有探索会话需关闭重开。该工具集保存明确提供的值，不自动提取浏览器 Cookie，也不清除站点冷却。
+
+## 上手示例：采集图书目录并发布接口
+
+先按上文启动完整平台。下面用 [Books to Scrape](https://books.toscrape.com/) 的图书列表演示；这是供网页采集练习的示例站点，价格和评分不代表真实商品信息。
+
+以下图片是当前前端的真实界面截图，书名、价格、应用和任务均为隔离的演示数据，并非目标站点的实际采集结果。
+
+### 1. 连接 MCP
+
+打开「MCP 服务」，复制客户端配置到 AgentHarness，连接 `http://127.0.0.1:8000/mcp`。连接成功后，AI 即可调用页面探索、脚本试跑和保存工具，无需安装额外 Skills。页面也可查看浏览器引擎和采集节流策略。
+
+![MCP 服务：查看接入配置、浏览器引擎和采集策略](docs/images/01-mcp-connection.png)
+
+### 2. 用提示词创作并验证脚本
+
+把下面这段提示词发送给已连接 MCP 的 AgentHarness：
+
+```text
+使用 Webloom MCP，为 https://books.toscrape.com/ 创建一个图书目录采集脚本。
+
+先探索真实页面，再编写、试跑并保存到「演示空间」；空间不存在时创建。
+只读取当前列表页，不逐条进入详情，最多 20 条。
+提取 title（书名）、price（原始价格文本）、availability（库存状态）、url（详情链接）。
+定义 url 字符串参数，默认上述地址；limit 数字参数，默认 20。
+将列表写入 OUTPUTS["items"]，按详情链接去重，并声明 items 输出字段。
+复用平台浏览器，遵守访问间隔和请求预算；遇到登录限制或验证页面时停止。
+试跑通过后保存脚本，告诉我 script_id、输入参数和验证结果，不发布接口。
+```
+
+在「脚本管理」中打开保存的脚本，可以检查代码、输入参数和输出字段。在「调试运行」填写参数后点击「保存并运行」，查看执行状态与结果。需要登录的站点，可让 AI 使用全局变量工具保存你提供的 Cookie、Header 或 localStorage，并绑定目标域名。
+
+![脚本编辑器：查看采集代码、参数定义并运行验证](docs/images/02-script-editor.png)
+
+### 3. 在后台发布采集接口
+
+1. 打开「开放平台 → 开放应用」，创建调用方应用，保存其 App Key 和 App Secret。
+2. 在脚本列表点击「发布接口」，或打开「开放平台 → 采集接口 → 发布采集接口」。
+3. 选择已验证的脚本，填写接口名称，将接口标识设为 `book-catalog`，选择刚创建的授权应用，点击「保存并发布」。接口标识发布后不可修改。
+4. 点击接口的「接入 / 调试」查看参数契约、cURL/Python 示例，或在「在线调试」提交任务。接口参数来自绑定脚本的输入定义。
+
+发布入口在管理后台，MCP 不提供发布平台相关工具。
+
+![发布采集接口：选择脚本、设置稳定标识并授权调用应用](docs/images/03-publish-collector.png)
+
+### 4. 从外部调用并查看结果
+
+下面的 `book-catalog` 要先按上一步发布；将凭证占位符替换为开放应用中查看的值。
+
+```bash
+export WEBLOOM_TOKEN='<APP_KEY>.<APP_SECRET>'
+
+curl --fail-with-body -X POST \
+  'http://127.0.0.1:8000/open/v1/collectors/book-catalog/runs' \
+  -H "Authorization: Bearer $WEBLOOM_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: book-demo-001' \
+  --data '{"inputs":{"url":"https://books.toscrape.com/","limit":20},"wait_seconds":0}'
+```
+
+返回 `202` 表示任务已受理，重点关注以下字段（其他字段省略，ID 以实际响应为准）：
+
+```json
+{
+  "execution_id": 1001,
+  "status": "pending",
+  "finished": false,
+  "result_url": "/open/v1/tasks/1001",
+  "data_url": "/open/v1/tasks/1001/data"
+}
+```
+
+使用相同凭证查询返回的 `result_url`。`wait_seconds=20` 最多等待 20 秒；若仍未完成，稍后继续查询。只有 `finished=true` 且 `status=success` 才表示采集成功，失败时查看 `error`，不要反复重新提交。
+
+```bash
+# 将 1001 换为提交响应中的 execution_id
+curl --fail-with-body \
+  'http://127.0.0.1:8000/open/v1/tasks/1001?wait_seconds=20' \
+  -H "Authorization: Bearer $WEBLOOM_TOKEN"
+
+# 采集成功后，按输出字段读取数据；可通过 skip/limit 分页
+curl --fail-with-body \
+  'http://127.0.0.1:8000/open/v1/tasks/1001/data?field=items&skip=0&limit=100' \
+  -H "Authorization: Bearer $WEBLOOM_TOKEN"
+
+# 下载这一页的 CSV
+curl --fail-with-body \
+  'http://127.0.0.1:8000/open/v1/tasks/1001/data?field=items&format=csv&limit=100' \
+  -H "Authorization: Bearer $WEBLOOM_TOKEN" \
+  -o books.csv
+```
+
+同一请求重试时保留原 `Idempotency-Key`，新的采集请求改用新键；同一键配上不同参数会返回 `409`。本机示例地址仅用于本地调用，对外部署方式见下方说明。
+
+在「采集任务与数据」中，可按应用、接口和状态筛选任务，点击「查看数据 / 日志」查看表格、完整 JSON 和执行日志。管理端可导出所选字段的全部 CSV 或完整结果 JSON。
+
+![采集任务结果：查看数据表格、导出 CSV/JSON 并展开执行日志](docs/images/04-collection-results.png)
+
+### 5. 给调用方使用独立体验页
+
+打开 `http://127.0.0.1:5173/collection-portal`，输入应用凭证 `App Key.App Secret`，即可选择获授权接口、填写参数、提交任务并查看自己的结果。这个页面不显示管理导航，凭证仅保留在当前页面内存中。
+
+![独立调用体验页：填写采集参数、查看历史任务和结果](docs/images/05-calling-portal.png)
+
+### 更新文档图片
+
+截图脚本使用当前前端、隔离的演示 API 响应和独立浏览器上下文，不连接真实业务 API，不创建平台记录，也不访问示例目标网站。只需安装后端依赖与 Chromium，并启动前端，然后在项目根目录运行：
+
+```bash
+backend/venv/bin/python backend/scripts/capture_readme.py
+# 前端使用其他端口时：
+# backend/venv/bin/python backend/scripts/capture_readme.py --base-url http://127.0.0.1:5174
+```
+
+图片保存到 `docs/images/`。更新前端界面或品牌后，可重新生成并检查这些图片。
 
 ## 开发检查
 

@@ -20,7 +20,7 @@ from app.database import Base
 OUT_FILE = Path(__file__).resolve().parent.parent / "mysql_ddl.sql"
 
 HEADER = """\
--- fishcode 平台 MySQL 建表 DDL（由 scripts/gen_mysql_ddl.py 从 SQLAlchemy 模型生成，勿手工改列）
+-- 采织 Webloom 平台 MySQL 建表 DDL（由 scripts/gen_mysql_ddl.py 从 SQLAlchemy 模型生成，勿手工改列）
 -- 改动模型后需重新执行：cd backend && python scripts/gen_mysql_ddl.py
 -- 使用前先建库（表已显式声明 utf8mb4）：
 -- CREATE DATABASE fishcode DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

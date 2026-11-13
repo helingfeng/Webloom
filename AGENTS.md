@@ -1,6 +1,8 @@
 # AGENTS.md
 
-小鱼（fishCode）架构指引。以 MCP 为主入口的网页数据采集平台：创作、验证并保存 Playwright Python 脚本，发布采集接口，查看任务与结果数据；数据源与数据视图继续提供管理能力。
+采织（Webloom）架构指引。以 MCP 为主入口的网页数据采集平台：创作、验证并保存 Playwright Python 脚本，发布采集接口，查看任务与结果数据；数据源与数据视图继续提供管理能力。
+
+品牌口号：让网页信息，织成可用数据。Logo 唯一源文件为 `frontend/public/brand-mark.svg`，导航、首页、调用门户通过 `BrandIdentity.vue` 复用，浏览器 SVG favicon 同源；PNG 与 ICO 为该 SVG 的导出资源，修改时同步导出。主题色位于 `frontend/src/assets/brand.css`。
 
 ## 1. 项目概览
 
@@ -44,7 +46,8 @@
 
 - `backend/app/mcp/server.py`：官方 `mcp` 包的 FastMCP，以 streamable-http 子应用嵌入 FastAPI 进程（端点 `/mcp`），**直接 import services 层，不走 HTTP**；每个工具内 `async with AsyncSessionLocal() as db:` 自建会话；业务异常转 `ToolError`。挂载必须放在所有路由之后（`mount_mcp(app)`）。
 - 工具集：采集闭环（`inspect_page` 探索页面并自动注入已配置登录态、`list_workspaces` / `create_workspace` / `list_scripts` / `get_script` 查找与准备、`create_script` / `update_script` 管理、`run_script` / `get_execution` 执行）。MCP 不回传明文凭证；数据源不通过 MCP 暴露。新增工具照 `@mcp.tool()` 样板，并同步更新顶部 `INSTRUCTIONS`。
-- `GET /api/mcp/status` 返回真实工具列表与客户端接入命令（服务名 `fishcode-scripts` 硬编码于该接口，改名需同步）；脚本创作规范内置在 `backend/app/mcp/server.py` 的 MCP instructions 和工具描述中，AgentHarness 不需要额外 Skills。
+- `GET /api/mcp/status` 返回真实工具列表与客户端接入命令（服务名 `webloom`，配置与命令均取自 `mcp.name`，避免改名后不同步）；脚本创作规范内置在 `backend/app/mcp/server.py` 的 MCP instructions 和工具描述中，AgentHarness 不需要额外 Skills。
+- MCP 通过 `list_global_variables/create_global_variable/update_global_variable/delete_global_variable` 管理用户明确提供的登录态和普通配置；共用 global_variable_service 校验、域名规范化、查重和部分更新。列表支持 domain（包含通用/父域）、type、enabled 和 skip/limit，返回 `{items,total}`。统一 `GlobalVariableOut` 脱敏，无明文读取工具；凭证只写 value，登录态建议绑定具体域名。保存后新会话/执行加载，旧探索会话需重开，不自动抓取 Cookie 或解除冷却。修改时运行 `tests/test_mcp_global_variables.py`（含真实试跑注入测试）。
 
 ## 2. 构建与命令
 
@@ -142,7 +145,7 @@ npm run test:unit  # vitest
 - 外部支持 Bearer `AppKey.AppSecret` 与原 HMAC；幂等键由 `Idempotency-Key` 指定，归属与 Execution 在同一事务内提交后入队。Task 列表不加载 outputs/inputs。
 - 前端 `/collectors` 发布与调试，`/collector-tasks` 数据查看，`/collection-portal` 为无管理导航的独立调用体验页（凭证仅存内存，所有请求走 /open）。Vite 已代理 /open。
 - 新任务归属不随清空日志丢失；旧版入口保留兼容但不做任务迁移。脚本更新影响绑定接口的新任务；执行记录有提交快照，但当前没有独立的接口发布版本。更多边界见 docs/collector-platform.md。
-- MCP 通过 list_open_apps（不返回凭证）、list_published_collectors、publish_collector 支持用户明确要求的发布闭环；单纯脚本创作不自动发布。
+- 采集接口发布、开放应用与授权配置仅通过管理后台提供；MCP 不暴露发布平台相关工具，仅保留脚本创作、验证、执行及全局变量管理。
 
 ## 已移除的功能
 

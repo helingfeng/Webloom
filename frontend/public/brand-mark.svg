@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>采织 Webloom</title>
+  <desc>三条网页信息线交织，汇成整齐的数据单元。</desc>
+  <rect width="64" height="64" rx="16" fill="#123C35"/>
+  <path d="M13 18H20C33 18 31 46 44 46H49" stroke="#69DEB1" stroke-width="4" stroke-linecap="round"/>
+  <path d="M13 46H20C33 46 31 18 44 18H49" stroke="#D8F8E9" stroke-width="4" stroke-linecap="round"/>
+  <path d="M13 32H49" stroke="#123C35" stroke-width="8" stroke-linecap="round"/>
+  <path d="M13 32H49" stroke="#69DEB1" stroke-width="4" stroke-linecap="round"/>
+  <rect x="44" y="13" width="10" height="10" rx="2.5" fill="#D8F8E9"/>
+  <rect x="44" y="27" width="10" height="10" rx="2.5" fill="#69DEB1"/>
+  <rect x="44" y="41" width="10" height="10" rx="2.5" fill="#69DEB1"/>
+</svg>

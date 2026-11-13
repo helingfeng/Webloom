@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 
 from app.database import engine, init_db
+from app.config import settings
 from app.mcp import mcp, mount_mcp
 from app.services.browser_authoring_service import browser_sessions
 from app.task_queue import close_pool
@@ -27,5 +28,5 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
 
 
-app = FastAPI(title="FishCode MCP", lifespan=lifespan)
+app = FastAPI(title=f"{settings.app_name} MCP", lifespan=lifespan)
 mount_mcp(app)

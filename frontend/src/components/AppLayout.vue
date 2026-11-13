@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import BrandIdentity from '@/components/BrandIdentity.vue'
 
 const route = useRoute()
 const wsStore = useWorkspaceStore()
@@ -54,7 +55,9 @@ function isActive(path: string) {
 <template>
   <el-container class="layout-container">
     <el-aside width="200px" class="sidebar">
-      <div class="logo">小鱼</div>
+      <router-link to="/" class="logo" aria-label="采织 Webloom 首页">
+        <BrandIdentity inverse />
+      </router-link>
       <div class="workspace-switch">
         <el-select
           :model-value="wsStore.currentWorkspaceId"
@@ -75,9 +78,9 @@ function isActive(path: string) {
         :default-active="route.path"
         class="menu"
         router
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409EFF"
+        background-color="#173a32"
+        text-color="#b4cec4"
+        active-text-color="#82e2bb"
       >
         <template v-for="item in menuItems" :key="item.path">
           <el-sub-menu v-if="item.children" :index="item.path">
@@ -123,7 +126,7 @@ function isActive(path: string) {
 }
 
 .sidebar {
-  background-color: #304156;
+  background-color: #173a32;
   color: #fff;
   flex-shrink: 0;
   display: flex;
@@ -138,18 +141,21 @@ function isActive(path: string) {
 }
 
 .logo {
-  height: 60px;
+  min-height: 84px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  font-weight: bold;
-  border-bottom: 1px solid #1f2d3d;
+  justify-content: flex-start;
+  padding: 0 20px;
+  text-decoration: none;
+  border-bottom: 1px solid #2a5144;
 }
+
+.logo:hover { background: #20493e; }
+.logo:focus-visible { outline: 2px solid #82e2bb; outline-offset: -3px; }
 
 .workspace-switch {
   padding: 12px 14px;
-  border-bottom: 1px solid #1f2d3d;
+  border-bottom: 1px solid #2a5144;
 }
 
 .workspace-select {
@@ -159,12 +165,12 @@ function isActive(path: string) {
 .main-content {
   flex: 1;
   min-width: 0;
-  background-color: #f5f7fa;
+  background-color: #f6f9f8;
   padding: 20px;
   overflow-y: auto;
 }
 
 :deep(.el-menu-item.active) {
-  color: #409eff !important;
+  color: #82e2bb !important;
 }
 </style>

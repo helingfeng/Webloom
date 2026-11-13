@@ -56,10 +56,10 @@ async def mcp_status(request: Request) -> Any:
             for t in tools
         ],
         "client_config": {
-            "mcp_servers_json": {"mcpServers": {"fishcode-scripts": {"url": direct}}},
-            "claude_cli_command": f"claude mcp add --transport http fishcode-scripts {direct}",
+            "mcp_servers_json": {"mcpServers": {mcp.name: {"url": direct}}},
+            "claude_cli_command": f"claude mcp add --transport http {mcp.name} {direct}",
             "trae_cli_command": (
-                "trae-cli mcp add-json fishcode-scripts "
+                f"trae-cli mcp add-json {mcp.name} "
                 f"'{json.dumps({"type": "http", "url": direct}, separators=(",", ":"))}'"
             ),
         },

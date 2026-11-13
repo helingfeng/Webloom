@@ -91,6 +91,7 @@ async def test_expired_session_and_cleanup():
 
 async def test_mcp_contract():
     tools = {t.name: t for t in await mcp.list_tools()}
+    assert {"list_open_apps", "list_published_collectors", "publish_collector"}.isdisjoint(tools)
     assert {
         "open_page",
         "browse_page",
