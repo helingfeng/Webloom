@@ -13,6 +13,20 @@ from app.services import authoring_service
 from app.services.browser_authoring_service import BrowserSession, BrowserSessions
 
 
+@pytest.fixture(autouse=True)
+def isolated_browser_settings(monkeypatch, tmp_path):
+    from app.engine.browser import BrowserOptions
+    from app.engine.collection import CollectionPolicy
+    from app.config import settings
+
+    monkeypatch.setattr(type(settings), "collection_policy", lambda _: CollectionPolicy(str(tmp_path / "traffic.sqlite3"), min_interval_seconds=0.01))
+
+    monkeypatch.setattr(
+        "app.services.browser_setting_service.get_browser_options",
+        AsyncMock(return_value=BrowserOptions()),
+    )
+
+
 def test_validate_real_template():
     assert validate_script_code("await page.goto(START_URL)")["valid"]
     assert validate_script_code("print(DATA_VIEWS_ONE)")["uses_data_views"]

@@ -11,6 +11,10 @@ from app.task_queue import QueueUnavailableError
 
 
 def test_health_reports_queue_stats(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.engine.browser import BrowserOptions
+
+    monkeypatch.setattr(app_main, "get_browser_options", AsyncMock(return_value=BrowserOptions()))
     async def fake_stats():
         return {"available": False, "depth": None, "worker_alive": False}
 

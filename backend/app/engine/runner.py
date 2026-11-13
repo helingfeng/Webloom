@@ -5,6 +5,7 @@ import os
 import sys
 import uuid
 from typing import Callable
+from pathlib import Path
 from urllib.parse import urlparse
 from app.models.script import Script
 from app.config import settings
@@ -14,7 +15,9 @@ from app.engine.parameters import effective_start_url
 SCRIPT_TEMPLATE = """import asyncio
 import json
 import os
-from playwright.async_api import async_playwright, expect
+from playwright.async_api import expect
+from app.engine.browser import BrowserOptions, managed_browser
+from app.engine.collection import CollectionPolicy, create_collection_context
 
 INPUTS = json.loads(os.environ.get("ATP_INPUTS", "{}"))
 GLOBAL_HEADERS = json.loads(os.environ.get("ATP_GLOBAL_HEADERS", "{}"))
@@ -31,17 +34,16 @@ START_URL = os.environ.get("ATP_START_URL", "")
 OUTPUTS = {}
 
 async def main():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=__HEADLESS__)
-        context = await browser.new_context(
-            extra_http_headers=GLOBAL_HEADERS if GLOBAL_HEADERS else None
+    browser_options = BrowserOptions.from_subprocess_env()
+    print("[browser] " + browser_options.engine)
+    async with managed_browser(browser_options, headless=__HEADLESS__) as browser:
+        context, COLLECT = await create_collection_context(
+            browser, CollectionPolicy.from_env(),
+            headers=GLOBAL_HEADERS, cookies=GLOBAL_COOKIES,
+            local_storage=GLOBAL_LOCAL_STORAGE, start_url=START_URL,
+            timeout=__TIMEOUT__,
         )
-        # 自动注入 cookies（如已配置 cookie 类型全局变量）
-        if GLOBAL_COOKIES:
-            print("[global] Injecting cookies: " + ", ".join(c["name"] for c in GLOBAL_COOKIES))
-            await context.add_cookies(GLOBAL_COOKIES)
         page = await context.new_page()
-        page.set_default_timeout(__TIMEOUT__)
 
         # 实时画面：CDP screencast 持续截帧写入临时文件，供前端轮询展示
         _frame_path = os.environ.get("ATP_FRAME_FILE", "")
@@ -71,20 +73,10 @@ async def main():
             except Exception as _e:
                 print("[live] Screencast unavailable: " + str(_e))
 
-        # 在首个业务页面脚本运行前注入，仅写入目标 origin，避免额外导航。
-        if GLOBAL_LOCAL_STORAGE and START_URL:
-            from urllib.parse import urlparse
-            _url = urlparse(START_URL)
-            if _url.scheme in ("http", "https") and _url.netloc:
-                _origin = _url.scheme + "://" + _url.netloc
-                await context.add_init_script(
-                    "if (location.origin === " + json.dumps(_origin) + ") {"
-                    "for (const [k,v] of Object.entries(" + json.dumps(GLOBAL_LOCAL_STORAGE) + ")) localStorage.setItem(k,v); }"
-                )
-
 __USER_CODE__
 
-        await browser.close()
+        await COLLECT.finish(page)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -134,7 +126,7 @@ def _extract_error_line(logs: str) -> str:
     """从子进程日志中提取最后的异常行（如 AssertionError: xxx）作为失败原因摘要"""
     lines = [line.strip() for line in logs.splitlines() if line.strip()]
     for line in reversed(lines):
-        if "Error" in line or "Exception" in line:
+        if "Error" in line or "Exception" in line or "CollectionStopped:" in line:
             return line
     return ""
 
@@ -206,13 +198,23 @@ async def execute_script_code(
     else:
         merged_cookies = list(global_cookies or [])
 
+    from app.services.browser_setting_service import get_browser_options
+
+    browser_options = await get_browser_options()
     full_code = render_script_code(script.code, headless)
     run_file = settings.executions_dir / f"run_{execution_id}_{uuid.uuid4().hex}.py"
     run_file.write_text(full_code, encoding="utf-8")
 
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2])
+        + (
+            os.pathsep + os.environ["PYTHONPATH"]
+            if os.environ.get("PYTHONPATH")
+            else ""
+        ),
+        **browser_options.to_subprocess_env(),
+        **settings.collection_policy().to_env(),
         "ATP_INPUTS": json.dumps(inputs),
         "ATP_GLOBAL_HEADERS": json.dumps(merged_headers),
         "ATP_GLOBAL_VARS": json.dumps(global_vars or {}),

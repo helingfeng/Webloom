@@ -1,16 +1,18 @@
 """有界、可连续操作的页面探索会话；与脚本执行分离。"""
 
 import asyncio
-import json
 import time
 import uuid
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from playwright.async_api import async_playwright
+from app.engine.browser import BrowserResource, launch_browser
+from app.config import settings
+from app.engine.collection import CollectionRuntime, create_collection_context
 
 from app.database import AsyncSessionLocal
 from app.services import global_variable_service
+from app.services.browser_setting_service import get_browser_options
 
 
 @dataclass
@@ -19,8 +21,11 @@ class BrowserSession:
     browser: object
     page: object
     credentials_applied: bool
+    engine: str = "playwright"
     touched: float = field(default_factory=time.monotonic)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    resource: BrowserResource | None = None
+    collection: CollectionRuntime | None = None
 
 
 class BrowserSessions:
@@ -37,10 +42,13 @@ class BrowserSessions:
         session = self.sessions.pop(key, None)
         if session:
             async with session.lock:
-                try:
-                    await session.browser.close()
-                finally:
-                    await session.playwright.stop()
+                if session.resource is not None:
+                    await session.resource.close()
+                else:
+                    try:
+                        await session.browser.close()
+                    finally:
+                        await session.playwright.stop()
 
     async def sweep(self):
         while True:
@@ -67,45 +75,45 @@ class BrowserSessions:
                             db, url
                         )
                     )
-            p = await async_playwright().start()
+            resource = await launch_browser(await get_browser_options(), headless=True)
+            p = resource
             browser = None
             try:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(extra_http_headers=headers or None)
-                if cookies:
-                    await context.add_cookies(cookies)
-                if storage:
-                    origin = f"{parsed.scheme}://{parsed.netloc}"
-                    await context.add_init_script(
-                        "if (location.origin === "
-                        + json.dumps(origin)
-                        + ") { for (const [k,v] of Object.entries("
-                        + json.dumps(storage)
-                        + ")) localStorage.setItem(k,v); }"
-                    )
+                browser = resource.browser
+                context, collection = await create_collection_context(
+                    browser, settings.collection_policy(), headers=headers,
+                    cookies=cookies, local_storage=storage, start_url=url, timeout=10000,
+                )
                 page = await context.new_page()
                 page.set_default_timeout(10000)
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 key = uuid.uuid4().hex
                 session = BrowserSession(
-                    p, browser, page, bool(headers or storage or cookies)
+                    p,
+                    browser,
+                    page,
+                    bool(headers or storage or cookies),
+                    engine=resource.engine,
+                    resource=resource,
+                    collection=collection,
                 )
                 result = await self.snapshot(session, max_chars)
                 self.sessions[key] = session
                 return {"session_id": key, **result}
             except BaseException:
-                if browser:
-                    await browser.close()
-                await p.stop()
+                await resource.close()
                 raise
 
     async def snapshot(self, session: BrowserSession, max_chars: int):
+        if session.collection:
+            await session.collection.check(session.page)
         limit = min(max(max_chars, 1000), 20000)
         data = await session.page.evaluate(SNAPSHOT, limit)
         return {
             "url": session.page.url,
             "title": await session.page.title(),
             "credentials_applied": session.credentials_applied,
+            "browser_engine": session.engine,
             **data,
         }
 
@@ -119,6 +127,10 @@ class BrowserSessions:
         async with session.lock:
             session.touched = time.monotonic()
             page = session.page
+            if session.collection:
+                await session.collection.check(page)
+                if action in ("click", "press", "scroll"):
+                    await session.collection.before_action(page)
             locator = page.locator(selector) if selector else None
             if (
                 action in ("click", "fill", "select", "press", "wait", "html")

@@ -9,6 +9,7 @@ backend/storage/app.db
 backend/storage/upload/
 backend/storage/scripts/
 backend/storage/executions/
+backend/storage/traffic/
 
 # 前端
 node_modules/

@@ -5,6 +5,8 @@ from pathlib import Path
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.services import global_variable_service
+from app.services.browser_setting_service import get_browser_options
+from app.engine.collection import create_collection_context
 
 
 class RecordingSession:
@@ -69,24 +71,25 @@ async def _run_recorder(
     local_storage: dict[str, str],
     cookies: list[dict],
 ) -> None:
-    from playwright.async_api import async_playwright
+    from app.engine.browser import managed_browser
 
     session.output_file.write_text("", encoding="utf-8")
 
     browser = None
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
+        async with managed_browser(
+            await get_browser_options(), headless=False
+        ) as browser:
             # 录制环境与脚本执行环境一致：注入公共 Header 全局变量
-            context = await browser.new_context(
-                extra_http_headers=headers if headers else None
+            context, collection = await create_collection_context(
+                browser, settings.collection_policy(), headers=headers,
+                cookies=cookies, local_storage=local_storage,
+                start_url=session.start_url, timeout=settings.playwright_timeout,
             )
-            # 与脚本执行引擎一致：注入 cookie 全局变量
-            if cookies:
-                await context.add_cookies(cookies)
             # 启动 Inspector 录制器（内部协议，与 codegen CLI 同源）
             await context._impl_obj._channel.send(
                 "enableRecorder",
+                None,
                 {
                     "language": "python-async",
                     "mode": "recording",
@@ -98,43 +101,20 @@ async def _run_recorder(
             )
             page = await context.new_page()
 
-            # 与脚本执行引擎一致：先访问起始 URL 写入 localStorage 登录态
-            if local_storage and session.start_url:
-                await page.goto(session.start_url, wait_until="domcontentloaded")
-                await page.evaluate(
-                    """(items) => {
-                        for (const [k, v] of Object.entries(items)) {
-                            localStorage.setItem(k, v);
-                        }
-                    }""",
-                    local_storage,
-                )
-                await page.goto(session.start_url, wait_until="domcontentloaded")
-            elif session.start_url:
+            if session.start_url:
                 await page.goto(session.start_url, wait_until="domcontentloaded")
 
             # 录制中的页面全部关闭（用户关掉了浏览器窗口）即结束
             while context.pages:
                 await asyncio.sleep(0.5)
-            await browser.close()
-            browser = None
+        browser = None
         await _finalize(session)
     except asyncio.CancelledError:
-        if browser:
-            try:
-                await browser.close()
-            except Exception:
-                pass
         session.status = "failed"
         session.error = "录制已中止"
         session.finished_at = datetime.now()
         raise
     except Exception as exc:
-        if browser:
-            try:
-                await browser.close()
-            except Exception:
-                pass
         session.status = "failed"
         session.error = f"录制失败: {exc}"
         session.finished_at = datetime.now()
@@ -193,7 +173,9 @@ def _extract_fragment(code: str) -> tuple[str, str]:
         if start_idx is None:
             if "page = await context.new_page()" in stripped:
                 start_idx = i + 1
-        elif stripped.startswith("# -----") or stripped.startswith("await context.close()"):
+        elif stripped.startswith("# -----") or stripped.startswith(
+            "await context.close()"
+        ):
             end_idx = i
             break
 

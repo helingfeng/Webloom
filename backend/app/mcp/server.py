@@ -38,13 +38,15 @@ INSTRUCTIONS = """FishCode 是网页采集脚本的完整创作环境。仅连�
 用户要求对外提供采集接口时，先 list_open_apps 和 list_published_collectors 检查已有配置，再 publish_collector 绑定已验证脚本与授权应用，返回调用地址；只有要求创作脚本时无需发布。应用密钥由用户在平台查看，不经 MCP 回传。
 4. 后续持久任务用 run_script 入队、get_execution 查看结果。pending 是排队；队列执行需要 Redis + worker。依赖 DATA_VIEWS 的脚本须走此路径验证。
 
-代码是已运行的 async main() 内代码体，可直接使用 page/context/browser、expect、INPUTS、OUTPUTS、START_URL、GLOBAL_VARS、GLOBAL_HEADERS、GLOBAL_LOCAL_STORAGE、DATA_VIEWS / DATA_VIEWS_ONE。无需自行启动浏览器；允许在代码体中 import Python 库。Playwright 异步调用必须 await。print 记录进度，将 JSON 可序列化结果写入 OUTPUTS。不要定义 main() 却不调用。
+代码是已运行的 async main() 内代码体，可直接使用 page/context/browser、COLLECT、expect、INPUTS、OUTPUTS、START_URL、GLOBAL_VARS、GLOBAL_HEADERS、GLOBAL_LOCAL_STORAGE、DATA_VIEWS / DATA_VIEWS_ONE。无需自行启动浏览器；允许在代码体中 import Python 库。Playwright 异步调用必须 await。print 记录进度，将 JSON 可序列化结果写入 OUTPUTS。不要定义 main() 却不调用。
 示例（选择器须依据真实页面调整）：
 await page.goto(START_URL, wait_until="domcontentloaded")
 await page.locator("article").first.wait_for()
 OUTPUTS["items"] = await page.locator("article").evaluate_all("els => els.map(e => ({text:e.innerText.trim()}))")
 
 优先语义定位器和稳定属性；批量提取列表，分页/滚动设置最大页数或条数并去重，处理空列表，避免固定 sleep。iframe 用 frame_locator，详情链接先收集后访问。登录态默认按 start_url 域名从平台注入；不要求用户重复提供平台已配凭证。不得声称绕过验证码或访问权限，遇到登录失效应说明具体阻碍。
+低负载采集约定：优先复用当前 context 和页面、公开/已授权 API 或页面已有结构化数据，避免逐条打开详情和重复刷新；禁止并行轰炸同站点。page.goto/reload/go_back/go_forward 默认等待 domcontentloaded，并自动遵守本机跨任务同域间隔、冷却和请求预算；DOM 提取等待具体字段。点击翻页/主动滚动前 await COLLECT.before_action(page)，操作后 await COLLECT.check(page)，并设置页数上限及无新增数据即停。详情链接可用 COLLECT.unique_urls(urls, page.url) 去掉锚点并去重；已获授权且确认地址的 JSON GET 可用 await COLLECT.fetch_json(url, params={...})，共用 Cookie 与预算，不自动跳转/重试。不要为重复采集固定轮换指纹、代理或清空 Cookie。
+HTTP 401/403/429/503 或明确验证标题会停止采集并设置同域冷却，尊重 Retry-After；不得捕获后继续反复请求、自动解验证码或声称绕过权限。导航/API 预算默认 50、同域主动访问默认间隔 2 秒，页面自身的图片/脚本/XHR 不作全量拦截。context.request 原生调用、page.evaluate 发请求和自建浏览器不受此主动访问节流，请使用内置入口。失败先检查原因，不能循环重跑整个脚本；验证页或冷却需要向用户说明。脚本末尾自动检查限制响应，避免把验证页当成成功数据。
 inputs 定义 {name,type,description,default,required}，type 为 string/number/boolean/secret/header/cookie/localStorage；outputs 定义 {name,description}。输入名与 INPUTS key、输出名与 OUTPUTS key 一致。START_URL 来自保存的 start_url。默认值自动合并，显式输入优先；数字与布尔值使用 JSON 原生类型，运行只接受已声明的参数。名为 url 的参数覆盖 START_URL 并用于选择域名登录态。
 """
 

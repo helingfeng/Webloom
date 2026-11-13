@@ -4,6 +4,13 @@
 -- CREATE DATABASE fishcode DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 
+CREATE TABLE `browser_settings`
+(
+    `id`                    bigint unsigned      NOT NULL AUTO_INCREMENT COMMENT '固定主键 1',
+    `cloakbrowser_enabled`  tinyint(1) unsigned  NOT NULL COMMENT '是否启用 CloakBrowser',
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='平台浏览器设置（固定单行）';
+
 CREATE TABLE `collector_tasks`
 (
     `id`            bigint unsigned  NOT NULL AUTO_INCREMENT COMMENT '主键',

@@ -24,6 +24,7 @@ from app.routers.collectors import (
     tasks_router as collector_tasks_router,
 )
 from app.services import log_stream_service
+from app.services.browser_setting_service import get_browser_options
 from app.services.datasource_query_service import connection_manager
 from app.task_queue import close_pool, get_pool, queue_stats
 from app.task_queue import QueueUnavailableError
@@ -97,7 +98,12 @@ app.mount("/storage", StaticFiles(directory=settings.storage_dir), name="storage
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "queue": await queue_stats()}
+    return {
+        "status": "ok",
+        "queue": await queue_stats(),
+        "browser": (await get_browser_options()).public_status(),
+        "collection_policy": settings.collection_policy().public_status(),
+    }
 
 
 @app.websocket("/api/ws/executions/{execution_id}")

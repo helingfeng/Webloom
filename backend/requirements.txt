@@ -5,8 +5,9 @@ aiosqlite==0.20.0  # 平台库已切 MySQL，此项仅供 scripts/migrate_sqlite
 pydantic>=2.11,<3
 pydantic-settings==2.6.1
 pytest==9.1.1
-httpx==0.27.2
-playwright==1.49.1
+httpx[socks]==0.27.2
+playwright==1.64.1
+cloakbrowser==0.7.2
 python-multipart==0.0.17
 aiomysql==0.2.0  # 平台主库驱动 + 数据源查询
 cryptography>=42.0.0

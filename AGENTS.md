@@ -162,3 +162,19 @@ npm run test:unit  # vitest
 - 全局变量列表与写入响应不含 value，仅 has_value；GET /api/global-variables/{id} 显式读取原值。PUT 支持部分更新，未传 value 保留，传空字符串清空。
 - Execution.script_snapshot 保存提交时的脚本、输入定义与浏览器配置，worker 不再读取后续修改的代码；历史空快照任务兼容旧读取路径。该字段不经 ExecutionOut 或外部 API 返回。
 - 页面「保存并运行」先持久化当前编辑内容，再提交真实输入；数字/布尔/敏感参数共用 ParameterValue，未指定值不传。自动 Mock 从页面移除，仅兼容旧 API 显式请求；默认 manual。
+
+## 浏览器提供方
+
+- app/engine/browser.py 统一 Playwright / CloakBrowser 启动和资源清理；探索、录制及 runner 模板全部走该层。用户脚本的 page/context/browser 与 expect 保持兼容。
+- `browser_settings` 固定单行保存 CloakBrowser 开关，后台 MCP 服务页经 `GET/PUT /api/mcp/browser-settings` 管理；`browser_setting_service.get_browser_options` 在每次启动浏览器前读取数据库，API/MCP/worker 不缓存，无需重启。未保存时回退 BROWSER_ENGINE 默认值；已打开会话和运行中的任务不切换。许可证始终仅来自本机环境配置/官方缓存，不经管理接口回传。
+- BROWSER_ENGINE 默认为 playwright；显式 cloakbrowser 时需 CLOAKBROWSER_LICENSE_KEY 或官方登录缓存，禁止自动注册/交互登录，失败不得静默降级。humanize、代理、locale、timezone 的 CLOAKBROWSER_* 配置仅用于 Cloak 引擎。
+- 子进程不加载 app.config/.env；runner 仅额外传 ATP_BROWSER_OPTIONS 和 ATP_BROWSER_LICENSE_KEY，并明确加入 backend 的 PYTHONPATH。健康状态和 MCP 状态不回传密钥或代理内容。
+- 固定 cloakbrowser==0.7.2、playwright==1.64.1（发行包要求 >=1.53,<1.65）；升级后须安装匹配的 Chromium，并验证内部 enableRecorder 协议。官方许可证和浏览器下载需用户已有授权，不自动注册邮箱或购买。
+
+## 低负载采集运行时
+
+- `engine/collection.py` 不加载 app.config/.env，`CollectionPolicy` 通过 `ATP_COLLECTION_POLICY` 显式传入子进程；`create_collection_context` 统一 Cookie/Header/首屏 localStorage 初始化，并给该 context 的页面绑定主动导航保护。探索、试跑、worker 和录制共用。
+- 同一 hostname 的导航/API/主动翻页操作默认间隔 2 秒、单次预算 50；单机跨进程通过 `storage/traffic/state.sqlite3` 的 SQLite 短事务协调（非平台主库，不含凭证/完整 URL，已忽略跟踪）。等待不持锁，取消不会占用未来时隙，过期记录自动清理。
+- 401/403/429/503 与明确验证标题停止采集并持久化冷却；尊重 Retry-After，更长等待不能被短冷却覆盖。第三方广告响应不触发业务熔断；不自动重试，不解验证码，不通过代理切换清除冷却。
+- 内置 `COLLECT.fetch_json` 仅已授权 GET，共用 Cookie/Headers、预算与冷却，不自动跳转；翻页/滚动用 `before_action/check`，结果 URL 可用 `unique_urls` 去重。原生 request/evaluate 网络、自建 context 不自动治理，不得宣称覆盖所有请求；无全量路由拦截，保留 HTTP 缓存。
+- 修改此链路运行 `tests/test_collection.py`、`tests/test_mcp_authoring.py`，含真实 Chromium；浏览器测试在 macOS 沙箱受限时需提升执行权限。
