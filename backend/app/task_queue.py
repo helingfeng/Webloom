@@ -1,8 +1,8 @@
-"""arq 任务队列接入（API 进程侧）：RpcPool 生命周期、入队、队列健康状态。
+"""执行后端入口：默认数据库持久队列 + 本地执行器，可选 Redis/arq。
 
-执行模型：API 进程只创建 Execution(status=pending) 并入队；
-worker 进程（``arq app.worker.WorkerSettings``）按 max_jobs 并发上限实际执行。
-Redis 不可用时入队抛 QueueUnavailableError，由调用方转为 503 / ToolError。
+API 创建 Execution(status=pending) 并提交，再由选定执行器并发执行。
+本地模式不初始化 Redis。显式 Redis 模式依赖独立 worker，
+队列不可用时抛 QueueUnavailableError，由调用方转为 503 / ToolError。
 """
 
 import asyncio
@@ -29,6 +29,8 @@ _pool_lock = asyncio.Lock()
 async def get_pool() -> ArqRedis:
     """懒初始化模块级 RpcPool（Redis 不可达时抛 QueueUnavailableError）"""
     global _pool
+    if settings.execution_backend != "redis":
+        raise QueueUnavailableError("本地执行模式不使用 Redis")
     if _pool is not None:
         return _pool
     async with _pool_lock:
@@ -62,6 +64,15 @@ def job_key(execution_id: int) -> str:
 async def enqueue_script_run(
     execution_id: int, headless_override: bool | None = None
 ) -> None:
+    if settings.execution_backend == "local":
+        from app.services.local_execution_service import local_executor
+
+        if not local_executor.running:
+            raise QueueUnavailableError(
+                "本地执行器未启动，请通过应用 lifespan 启动服务"
+            )
+        local_executor.notify()
+        return
     try:
         pool = await get_pool()
         await pool.enqueue_job(
@@ -90,9 +101,36 @@ async def _drop_broken_pool(exc: Exception) -> None:
 async def queue_stats() -> dict:
     """队列健康状态：{available, depth, worker_alive}；任何异常降级为不可用，绝不抛出"""
     try:
+        if settings.execution_backend == "local":
+            from app.services.local_execution_service import local_executor
+
+            return await local_executor.stats()
         pool = await get_pool()
         depth = await pool.zcard(arq_constants.default_queue_name)
         alive = await pool.get(WORKER_HEARTBEAT_KEY)
         return {"available": True, "depth": depth, "worker_alive": alive is not None}
     except Exception:
         return {"available": False, "depth": None, "worker_alive": False}
+
+
+async def start_execution_backend() -> None:
+    if settings.execution_backend == "local":
+        from app.services.local_execution_service import local_executor
+
+        await local_executor.start()
+    else:
+        try:
+            await get_pool()
+        except QueueUnavailableError:
+            pass  # Redis 故障时保留管理功能，提交执行返回 503。
+
+
+async def stop_execution_backend() -> None:
+    if settings.execution_backend == "local":
+        from app.services.local_execution_service import local_executor
+
+        await local_executor.stop()
+    await close_pool()
+    from app.services.log_bus import close_redis
+
+    await close_redis()

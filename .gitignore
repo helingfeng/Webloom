@@ -6,6 +6,10 @@ venv/
 
 # 后端运行时数据
 backend/storage/app.db
+backend/storage/*.db
+backend/storage/*.db-wal
+backend/storage/*.db-shm
+backend/storage/local-executor.lock
 backend/storage/upload/
 backend/storage/scripts/
 backend/storage/executions/

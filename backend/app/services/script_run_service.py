@@ -156,6 +156,9 @@ async def run_script_execution(
                 else {}
             )
 
+            # 外部脚本执行期间不持有读事务；SQLite WAL 下避免旧快照升级写事务失败。
+            await session.commit()
+
             _, outputs = await execute_script_code(
                 script,
                 task_inputs,

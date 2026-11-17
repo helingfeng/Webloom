@@ -12,7 +12,7 @@ const endpoints = [
   { method: 'GET', path: '/open/v1/tasks/{execution_id}/data', description: '按输出字段分页读取或导出数据', params: 'field、skip=0、limit=100（1–1000）、format=json 或 csv' },
 ]
 const statuses = [
-  { status: 'pending', finished: 'false', meaning: '任务已提交，等待 worker 执行' },
+  { status: 'pending', finished: 'false', meaning: '任务已提交，等待执行器调度' },
   { status: 'running', finished: 'false', meaning: '正在采集，继续查询结果' },
   { status: 'success', finished: 'true', meaning: '采集完成，可读取 outputs 或导出数据' },
   { status: 'failed', finished: 'true', meaning: '采集失败，查看 error；重新执行需使用新的幂等键' },

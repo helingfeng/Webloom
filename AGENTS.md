@@ -8,7 +8,7 @@
 
 前后端分离的本地单用户平台：
 
-- **backend/** — FastAPI + SQLAlchemy 2.0 (async) + MySQL。负责脚本/采集接口/任务/执行记录/全局变量/数据源/数据视图的 CRUD，通过子进程运行 Playwright Python 脚本并收集结果；内嵌 MCP 服务。
+- **backend/** — FastAPI + SQLAlchemy 2.0 (async)，默认 SQLite、可选 MySQL。负责脚本/采集接口/任务/执行记录/全局变量/数据源/数据视图的 CRUD，通过子进程运行 Playwright Python 脚本并收集结果；内嵌 MCP 服务。
 - **frontend/** — Vue 3 + TypeScript + Element Plus + Pinia+ Monaco（代码/SQL 编辑器）。开发时由 Vite 代理 `/api`、`/storage` 到后端（含 WebSocket）。
 
 核心执行流：前端点击运行 → `POST /api/scripts/{id}/run` 立即返回 execution_id → 后台任务将用户代码嵌入 `SCRIPT_TEMPLATE`（`backend/app/engine/runner.py`）→ 子进程执行 → stdout 逐行经 WebSocket `/api/ws/executions/{id}` 推送到前端 → 前端同时每秒轮询 execution 状态直到结束。
@@ -23,9 +23,9 @@
 
 - **脚本执行约定**：用户代码片段在模板内可使用 `INPUTS`、`OUTPUTS`、`GLOBAL_HEADERS`、`GLOBAL_VARS`、`GLOBAL_LOCAL_STORAGE`、`DATA_VIEWS` / `DATA_VIEWS_ONE` 与 `page/context/browser`。结果通过 stdout 中 `__ATP_OUTPUTS__{json}` 标记回传解析。参数经环境变量（`ATP_INPUTS` 等）传入子进程，且必须设置 `PYTHONUNBUFFERED=1`（否则日志会缓冲到结束才输出）。输入变量类型除 string/number/boolean/secret 外支持 `header`/`cookie`/`localStorage`（变量名即注入名，Cookie 域取起始 URL host），执行时与全局变量合并且**输入变量优先**（覆盖同名项，拆分逻辑在 `runner.py::_split_browser_inputs`）。
 - **全局变量三种类型**：`header`（注入浏览器 `extra_http_headers`）、`localStorage`（通过 init script 在目标页面脚本执行前写入）、`variable`（注入 `GLOBAL_VARS`），另有 cookie 支持；按域名匹配（精确或子域名，未绑定域名的全局生效）。脚本通过 `Script.inherit_global`（默认 true）控制是否继承。
-- **队列执行模式（Redis + arq worker）**：API 进程只创建 `pending` 状态 Execution 并经 `task_queue.enqueue_*` 入队（`_job_id = exec:{execution_id}` 幂等防重），实际执行在独立 worker 进程（`app/worker.py`）。Redis 不可用时 run 接口返回 503、该执行留痕 failed。worker `max_jobs` = `max_concurrent_executions`（默认 5）；`job_timeout` = `script_execution_timeout + 30`。恢复机制：worker 启动时把 `running` 执行标为 failed（worker 重启中断）并清理残留 job 键；心跳循环每 10s 兜底把超龄（>60s）`pending` 重新入队（Redis 重启丢队列后自愈，`_job_id` 去重不会重复执行）。worker 无 `--reload`，改后端代码需手动重启；**单机只跑一个 worker**（多个会误触发恢复逻辑）。
-- **日志流（LogBus）**：worker 内 `services/log_bus.py::ExecutionLogBus` 每行分配递增 seq（1 seq = 1 行，行尾强制 `\n`），经 Redis pub/sub（channel `exec:logs:{id}`，内部 JSON 含 seq/eof 控制消息）实时分发 + 每 1s 增量 `CONCAT` 落库 `executions.logs`（Text 64KB 超限时自动停落库，实时流不受影响）。API 进程 `services/log_stream_service.py` 先订阅再从 DB 重放、seq 对齐去重补洞，EOF（终态落库后发布）触发收尾；Redis 不可用自动退化为 DB 轮询。对前端 WS 消息保持纯文本日志行。
-- **MySQL 迁移**：无 Alembic。`database.py` 的 `init_db()` 在 `create_all` 后对已有表做幂等 `ALTER TABLE ... ADD COLUMN`（`_migrate` 内先 `inspect` 检查列是否存在）。新建表无需迁移，仅给已有表加列时写 ALTER 块。主库为 MySQL，`_migrate` 裸 SQL 必须双方言兼容：标识符统一反引号（`usage`/`key`/`database` 等为 MySQL 保留字），索引用 `inspector.get_indexes()` 判断后再 `CREATE INDEX`（MySQL 不支持 `IF NOT EXISTS`）。建表 DDL 由 `backend/scripts/gen_mysql_ddl.py` 从模型生成到 `backend/mysql_ddl.sql`（改模型后必须重新生成；模型列须带 `comment`，主键/ID 列用 `BigIntUnsigned`）。
+- **可选队列执行模式（EXECUTION_BACKEND=redis，Redis + arq worker）**：API 进程只创建 `pending` 状态 Execution 并经 `task_queue.enqueue_*` 入队（`_job_id = exec:{execution_id}` 幂等防重），实际执行在独立 worker 进程（`app/worker.py`）。Redis 不可用时 run 接口返回 503、该执行留痕 failed。worker `max_jobs` = `max_concurrent_executions`（默认 5）；`job_timeout` = `script_execution_timeout + 30`。恢复机制：worker 启动时把 `running` 执行标为 failed（worker 重启中断）并清理残留 job 键；心跳循环每 10s 兜底把超龄（>60s）`pending` 重新入队（Redis 重启丢队列后自愈，`_job_id` 去重不会重复执行）。worker 无 `--reload`，改后端代码需手动重启；**单机只跑一个 worker**（多个会误触发恢复逻辑）。
+- **日志流（LogBus）**：默认 local 模式不连接 Redis，直接使用数据库增量推送；Redis 模式的 worker 内 `services/log_bus.py::ExecutionLogBus` 每行分配递增 seq（1 seq = 1 行，行尾强制 `\n`），经 Redis pub/sub（channel `exec:logs:{id}`，内部 JSON 含 seq/eof 控制消息）实时分发 + 每 1s 增量 `CONCAT` 落库 `executions.logs`（Text 64KB 超限时自动停落库，实时流不受影响）。API 进程 `services/log_stream_service.py` 先订阅再从 DB 重放、seq 对齐去重补洞，EOF（终态落库后发布）触发收尾；Redis 不可用自动退化为 DB 轮询。对前端 WS 消息保持纯文本日志行。
+- **MySQL 迁移**：无 Alembic。`database.py` 的 `init_db()` 在 `create_all` 后对已有表做幂等 `ALTER TABLE ... ADD COLUMN`（`_migrate` 内先 `inspect` 检查列是否存在）。新建表无需迁移，仅给已有表加列时写 ALTER 块。平台主库默认 SQLite、可选 MySQL，`_migrate` 裸 SQL 必须双方言兼容：标识符统一反引号（`usage`/`key`/`database` 等为 MySQL 保留字），索引用 `inspector.get_indexes()` 判断后再 `CREATE INDEX`（MySQL 不支持 `IF NOT EXISTS`）。建表 DDL 由 `backend/scripts/gen_mysql_ddl.py` 从模型生成到 `backend/mysql_ddl.sql`（改模型后必须重新生成；模型列须带 `comment`，主键/ID 列用 `BigIntUnsigned`）。
 
 ### 开放平台
 
@@ -51,12 +51,12 @@
 
 ## 2. 构建与命令
 
-### 基础设施（先于后端启动）
+### 基础设施（仅可选外部服务模式需要）
 
 ```bash
-# 使用 backend/.env 中 REDIS_URL 对应的实例，已有 Redis 时无需重复启动。
-# 本机当前使用 6379 的需认证实例，凭证仅保存在未跟踪的 backend/.env。
-# 新环境需要独立实例时，可选择空闲端口并同步配置 REDIS_URL。
+# 默认 SQLite/local，无需数据库或队列服务器。
+# 显式选择 MySQL 或 EXECUTION_BACKEND=redis 时才启动对应服务。
+# 已有 backend/.env 连接配置继续生效，切换测试库不会迁移或删除原数据。
 ```
 
 ### 后端 API（端口 8000）
@@ -69,7 +69,7 @@ pip install -r requirements.txt
 playwright install chromium                  # 首次需要
 ```
 
-### 执行 worker（独立进程，必启动）
+### 执行 worker（仅 EXECUTION_BACKEND=redis 需要）
 
 ```bash
 cd backend && ./venv/bin/python3 -m app.worker   # 无 --reload，改代码需手动重启；单机只能跑一个
@@ -77,7 +77,7 @@ cd backend && ./venv/bin/python3 -m app.worker   # 无 --reload，改代码需�
 
 入口 `worker.py::_supervise` 带断线守护：Redis 瞬断/重启导致 arq 主循环退出时自动重启（也可直接 `arq app.worker.WorkerSettings`，但无自动重启）。
 
-不启动 worker 时任务会停留在队列（run 接口正常返回 pending），`/api/health` 的 `queue.worker_alive=false` 可诊断。
+Redis 模式不启动 worker 时任务会停留在队列（run 接口正常返回 pending），`/api/health` 的 `queue.worker_alive=false` 可诊断。本地模式由 API/MCP 进程内执行器调度，不启动独立 worker；同一存储目录仅允许运行一个服务进程。
 
 ### 前端（端口 5173）
 
@@ -125,8 +125,8 @@ npm run test:unit  # vitest
 
 ## 6. 配置
 
-- 后端配置集中在 `backend/app/config.py`（pydantic-settings），支持 `backend/.env` 覆盖（样例见 `.env.example`）。关键项：`headless`（浏览器是否无头）、`playwright_timeout`、`script_execution_timeout`、`sql_query_timeout`（30s）、`sql_max_rows`（1000）、`database_url`（MySQL DSN，默认 `mysql+aiomysql://root:helingfeng@127.0.0.1:3306/fishcode?charset=utf8mb4`，表级字符集 utf8mb4；注意 URL 驱动后缀必须是 `+aiomysql`，裸 `mysql://` 会去加载未安装的 MySQLdb）；执行队列：`redis_url`（默认 `redis://127.0.0.1:6379/0`，本机 `.env` 使用 6379 并配置认证）、`max_concurrent_executions`（默认 5）；数据采集：`cache_ttl_seconds`（30s）、`datasource_pool_size`/`datasource_max_overflow`（5/10）、`database_pool_size`/`database_max_overflow`（20/40，主库连接池仅 MySQL 方言生效）。
-- 平台主库为 MySQL（`fishcode`）：建表 DDL 在 `backend/mysql_ddl.sql`；SQLite 存量数据经 `backend/scripts/migrate_sqlite_to_mysql.py` 一次性迁入（MySQL 侧已有数据的表自动跳过）。`backend/storage/app.db` 为历史 SQLite 存量，不再被服务读写。引擎已带 `pool_pre_ping`/`pool_recycle=3600` 防 MySQL 长连接被 `wait_timeout` 掐断。
+- 后端配置集中在 `backend/app/config.py`（pydantic-settings），支持 `backend/.env` 覆盖（样例见 `.env.example`）。关键项：`headless`（浏览器是否无头）、`playwright_timeout`、`script_execution_timeout`、`sql_query_timeout`（30s）、`sql_max_rows`（1000）、`database_url`（默认 SQLite 文件库，MySQL 可选；MySQL URL 驱动后缀须为 `+aiomysql`，裸 `mysql://` 不支持）；执行后端：`execution_backend`（默认 local，可选 redis）；Redis 模式的 `redis_url`（默认 `redis://127.0.0.1:6379/0`，本机 `.env` 使用 6379 并配置认证）、`max_concurrent_executions`（默认 5）；数据采集：`cache_ttl_seconds`（30s）、`datasource_pool_size`/`datasource_max_overflow`（5/10）、`database_pool_size`/`database_max_overflow`（20/40，主库连接池仅 MySQL 方言生效）。
+- 平台主库默认 SQLite（`storage/webloom.db`），可选 MySQL；MySQL 建表 DDL 在 `backend/mysql_ddl.sql`；SQLite 存量数据经 `backend/scripts/migrate_sqlite_to_mysql.py` 一次性迁入（MySQL 侧已有数据的表自动跳过）。`backend/storage/app.db` 为历史 SQLite 存量，不再被服务读写。引擎已带 `pool_pre_ping`/`pool_recycle=3600` 防 MySQL 长连接被 `wait_timeout` 掐断。
 - 前端 Vite 代理配置在 `frontend/vite.config.ts`：`/api` 代理需带 `ws: true`（WebSocket 日志推送依赖）。
 - 数据库/存储均在 `backend/storage/`（历史 app.db、scripts/）；`app/skills/` 目录预留存放 Skill 模板 JSON。
 
@@ -137,6 +137,15 @@ npm run test:unit  # vitest
 - `open_page` → `browse_page` → `preview_script` → `create_script/update_script` → `close_page`；运行规范全部内置 MCP，不依赖额外 Skills。
 - 试跑共用 runner 模板，无 Redis/worker，无持久执行记录；持久任务继续走队列。数据视图依赖仅持久任务支持。
 - 修改创作链路运行 `tests/test_mcp_authoring.py`（含真实 Chromium 测试）；接入和运行边界见 `README.md`。
+
+## SQLite 与本地执行模式
+
+- `DATABASE_URL` 默认指向 `backend/storage/webloom.db`（绝对路径），SQLite 使用 aiosqlite、WAL 与 30 秒锁等待。`BigIntUnsigned` 在 SQLite 下映射 INTEGER，在 MySQL 下仍为 BIGINT UNSIGNED，主键自增必须在生产类型中兼容，禁止仅靠测试 compiler 补丁。
+- `EXECUTION_BACKEND=local` 默认启用，`services/local_execution_service.py` 以数据库 pending 记录作为持久队列，按 `max_concurrent_executions` 限流；无 Redis 客户端连接，日志经数据库增量轮询推送。
+- 完整应用和最小 MCP 入口都通过 lifespan 启停执行器；文件锁 `storage/local-executor.lock` 防止同一存储目录重复启动。仅单进程 `--workers 1`，不要同时启动完整应用与最小 MCP。服务重启将 running 标为 failed，pending 脚本自动继续，历史非脚本任务失败停用；停止服务会取消正在执行的子进程并留痕，排队记录保留。
+- 本地/Redis 共用 `script_run_service`、脚本提交快照、超时与临时文件清理。执行外部脚本前释放读事务，避免 SQLite WAL 旧快照升级写事务失败。
+- 数据库类型和执行后端相互独立。显式 `EXECUTION_BACKEND=redis` 才连接 Redis、运行独立 worker；Redis 故障不得静默切换成本地重复执行。主库连接信息只在 backend/.env 中配置，不对已有本机库自动迁移或替换。
+- `tests/test_local_execution.py` 验证并发、防重、恢复、停止、进程锁与无 Redis 日志；`tests/test_local_platform.py` 用独立临时 SQLite、真实服务与 Chromium 验证 API/开放接口/MCP 持久执行和重启后取数，不依赖 MySQL/Redis 服务。
 
 ## 采集接口发布主路径
 

@@ -3,6 +3,7 @@ import ast
 import json
 import os
 import sys
+import time
 import uuid
 from typing import Callable
 from pathlib import Path
@@ -297,6 +298,23 @@ def cleanup_execution_temp_files(execution_id: int) -> None:
         path.unlink(missing_ok=True)
     frame = settings.executions_dir / f"frame_{execution_id}.jpg"
     frame.unlink(missing_ok=True)
+
+
+def cleanup_orphan_execution_files(max_age_seconds: int = 24 * 3600) -> None:
+    """本地执行器和 Redis worker 共用的临时文件清扫。"""
+    if not settings.executions_dir.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    for path in settings.executions_dir.iterdir():
+        is_temp = (
+            path.name.startswith("run_") and path.suffix == ".py"
+        ) or path.name.startswith("frame_")
+        if is_temp and path.is_file():
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _parse_outputs(text: str) -> dict:

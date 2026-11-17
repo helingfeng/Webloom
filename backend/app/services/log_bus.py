@@ -64,6 +64,13 @@ async def _get_redis():
     return _redis_client
 
 
+async def close_redis():
+    global _redis_client
+    if _redis_client is not None:
+        await _redis_client.aclose()
+        _redis_client = None
+
+
 class ExecutionLogBus:
     """单次执行的日志缓冲与分发器。
 
@@ -86,7 +93,9 @@ class ExecutionLogBus:
         self._flush_interval = flush_interval
         self._seq = 0
         self._pending: list[str] = []  # 待落库的行（按序）
-        self._live: deque[tuple[int, str]] = deque(maxlen=live_buffer_max)  # 待发布的 (seq, line)
+        self._live: deque[tuple[int, str]] = deque(
+            maxlen=live_buffer_max
+        )  # 待发布的 (seq, line)
         self._publisher_task: asyncio.Task | None = None
         self._flusher_task: asyncio.Task | None = None
         self._closed = False
@@ -172,7 +181,11 @@ class ExecutionLogBus:
         self._closed = True
         if publish_eof:
             try:
-                publish = self._publish if self._publish is not None else self._default_publish
+                publish = (
+                    self._publish
+                    if self._publish is not None
+                    else self._default_publish
+                )
                 await publish(encode_eof(self._seq))
             except Exception:
                 pass  # EOF 丢失时 WS 侧按终态轮询兜底
@@ -187,6 +200,8 @@ class ExecutionLogBus:
         self._flusher_task = None
 
     async def _default_publish(self, message: str) -> None:
+        if settings.execution_backend == "local":
+            return  # 本地模式使用已落库日志推送，不创建 Redis 客户端。
         redis = await _get_redis()
         await redis.publish(logs_channel(self.execution_id), message)
 

@@ -8,17 +8,9 @@ from typing import Any, AsyncIterator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import BigInteger
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-
-
-@compiles(BigInteger, "sqlite")
-def _bigint_as_integer(type_, compiler, **kw):
-    """SQLite 下把 BIGINT 主键编译为 INTEGER，使 rowid 别名自增生效（仅测试环境）"""
-    return "INTEGER"
 
 
 @pytest_asyncio.fixture

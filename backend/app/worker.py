@@ -19,7 +19,10 @@ from sqlalchemy import select, or_
 
 from app.config import settings
 from app.database import AsyncSessionLocal, init_db
-from app.engine.runner import cleanup_execution_temp_files
+from app.engine.runner import (
+    cleanup_execution_temp_files,
+    cleanup_orphan_execution_files,
+)
 from app.models.execution import Execution
 from app.services import script_run_service
 from app.services.datasource_query_service import connection_manager
@@ -45,20 +48,7 @@ async def run_script_execution(
 
 def cleanup_orphan_files(max_age_seconds: int = ORPHAN_FILE_MAX_AGE) -> None:
     """清扫临时目录中超过阈值的孤儿运行文件/画面帧（崩溃残留兜底）"""
-    if not settings.executions_dir.exists():
-        return
-    cutoff = time.time() - max_age_seconds
-    for path in settings.executions_dir.iterdir():
-        is_temp = (
-            path.name.startswith("run_") and path.suffix == ".py"
-        ) or path.name.startswith("frame_")
-        if not is_temp or not path.is_file():
-            continue
-        try:
-            if path.stat().st_mtime < cutoff:
-                path.unlink(missing_ok=True)
-        except OSError:
-            continue
+    cleanup_orphan_execution_files(max_age_seconds)
 
 
 async def recover_interrupted(redis) -> None:
@@ -185,6 +175,11 @@ def _supervise() -> None:
     """
     import sys
     import time
+
+    if settings.execution_backend != "redis":
+        sys.exit(
+            "本地模式无需独立 worker；使用 Redis 队列时请配置 EXECUTION_BACKEND=redis"
+        )
 
     from arq import run_worker
 

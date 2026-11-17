@@ -25,7 +25,8 @@ class _FakePool:
 
 
 @pytest.fixture(autouse=True)
-def _reset_pool():
+def _reset_pool(monkeypatch):
+    monkeypatch.setattr(task_queue.settings, "execution_backend", "redis")
     task_queue._pool = None
     yield
     task_queue._pool = None

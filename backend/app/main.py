@@ -4,7 +4,7 @@ from app.services.browser_authoring_service import browser_sessions
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.database import init_db
+from app.database import init_db, engine
 from app.config import settings
 from app.routers import (
     scripts,
@@ -26,19 +26,14 @@ from app.routers.collectors import (
 from app.services import log_stream_service
 from app.services.browser_setting_service import get_browser_options
 from app.services.datasource_query_service import connection_manager
-from app.task_queue import close_pool, get_pool, queue_stats
-from app.task_queue import QueueUnavailableError
+from app.task_queue import start_execution_backend, stop_execution_backend, queue_stats
 from app.mcp import mcp, mount_mcp
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    # 预热任务队列连接；Redis 未启动时 API 照常服务（run 接口返回 503，health 暴露状态）
-    try:
-        await get_pool()
-    except QueueUnavailableError:
-        pass
+    await start_execution_backend()
     sweeper = asyncio.create_task(browser_sessions.sweep())
     try:
         async with mcp.session_manager.run():
@@ -48,8 +43,9 @@ async def lifespan(app: FastAPI):
         with suppress(asyncio.CancelledError):
             await sweeper
         await browser_sessions.close_all()
-    await close_pool()
-    await connection_manager.dispose_all()
+        await stop_execution_backend()
+        await connection_manager.dispose_all()
+        await engine.dispose()
 
 
 app = FastAPI(
@@ -100,6 +96,8 @@ app.mount("/storage", StaticFiles(directory=settings.storage_dir), name="storage
 async def health_check():
     return {
         "status": "ok",
+        "execution_backend": settings.execution_backend,
+        "database": engine.dialect.name,
         "queue": await queue_stats(),
         "browser": (await get_browser_options()).public_status(),
         "collection_policy": settings.collection_policy().public_status(),

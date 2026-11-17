@@ -56,7 +56,7 @@ Webloom 是通用网页数据采集工具，仅用于合法、获得授权的数
 
 ## 环境与安装
 
-需要 Python 3.13、Node.js `^22.18.0` 或 `>=24.12.0`、MySQL 8。持久任务执行需要 Redis；API 与唯一 worker 使用相同的 `REDIS_URL`。
+需要 Python 3.13、Node.js `^22.18.0` 或 `>=24.12.0`。默认使用 **SQLite + 本地执行器**，无需安装 MySQL、Redis，也无需启动独立 worker，适合快速部署与测试。MySQL 和 Redis 队列仍可按需启用。
 
 ```bash
 cd backend
@@ -66,32 +66,37 @@ python3 -m venv venv
 cp -n .env.example .env
 ```
 
-编辑 `backend/.env`，配置 `DATABASE_URL` 和 `REDIS_URL`。Redis 使用密码时，URL 格式为 `redis://:<密码>@127.0.0.1:6379/0`；特殊字符需做 URL 编码。不要覆盖已有的本机配置或提交真实凭证。
+新环境复制示例配置后即可启动。未设置 `DATABASE_URL` 时，自动在 `backend/storage/webloom.db` 创建数据库；不读取历史的 `backend/storage/app.db`。
 
-先创建 MySQL 数据库：
+已有 `.env` 中的 MySQL 地址会继续生效。要切换为轻量测试环境，请在 `backend/.env` 中明确设置（以下相对路径适用于从 backend 目录启动）：
 
-```bash
-mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS fishcode DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+```dotenv
+DATABASE_URL=sqlite+aiosqlite:///./storage/webloom.db
+EXECUTION_BACKEND=local
 ```
 
-服务启动时自动建表和执行幂等补列迁移；建表参考为 `backend/mysql_ddl.sql`。MySQL DSN 驱动应使用 `mysql+aiomysql://`。
+服务自动建表和执行幂等迁移。切换连接地址不会自动迁移或删除原数据库的数据；测试完成后可切回原连接。不要覆盖已有的本机凭证或提交真实 `.env`、数据库文件。
+
+也可以临时覆盖环境变量，直接体验而不编辑原 `.env`：
+
+```bash
+cd backend
+env EXECUTION_BACKEND=local DATABASE_URL=sqlite+aiosqlite:///./storage/webloom.db \
+  ./venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+切换执行后端前先停止原来的 API/MCP 服务和独立 worker，避免不同执行器同时处理同一个数据库中的任务。
 
 ## 启动
 
 ### 完整平台
 
-确保 MySQL 和配置中的 Redis 已启动，然后分别在三个终端运行：
+默认本地模式只需两个终端，无外部数据库或队列服务：
 
 ```bash
-# 后端 API 与 MCP
+# 后端 API、MCP 与内置任务执行器（只运行一个服务进程）
 cd backend
 ./venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-```bash
-# 唯一执行 worker：修改后端执行代码后手动重启
-cd backend
-./venv/bin/python -m app.worker
 ```
 
 ```bash
@@ -103,9 +108,33 @@ npm run dev -- --host 127.0.0.1
 
 打开 `http://127.0.0.1:5173`。前端代理 `/api`（含 WebSocket）、`/open`、`/mcp`、`/storage` 到后端。检查 `GET http://127.0.0.1:8000/api/health`，队列应显示 `available=true`、`worker_alive=true`。
 
+本地模式还会显示 `execution_backend=local`、默认 `database=sqlite`。任务先保存到数据库，再由进程内执行器按 `MAX_CONCURRENT_EXECUTIONS` 调度；服务重启会将中断的 running 任务标为失败，并继续执行已保存的 pending 任务。日志通过数据库增量推送，无需 Redis。SQLite 使用 WAL 和锁等待以支持并发读写。
+
+本地执行器带进程锁：同一存储目录只允许一个完整应用或最小 MCP 进程，使用 `--workers 1`。修改执行代码后重启服务；正在运行的任务会中断，排队记录保留。备份 SQLite 时请先停止服务，再备份数据库文件及存储目录。
+
+### 可选：MySQL / Redis 部署
+
+数据库类型与执行后端独立选择：SQLite、MySQL 均可搭配 local 或 redis 模式。MySQL 需先建库，DSN 驱动使用 `mysql+aiomysql://`；建表参考见 `backend/mysql_ddl.sql`。
+
+```dotenv
+# backend/.env；填写自己的连接信息
+DATABASE_URL=mysql+aiomysql://user:password@127.0.0.1:3306/webloom?charset=utf8mb4
+EXECUTION_BACKEND=redis
+REDIS_URL=redis://:password@127.0.0.1:6379/0
+```
+
+Redis 模式下，先启动数据库和 Redis，再启动 API、前端以及**唯一的独立 worker**：
+
+```bash
+cd backend
+./venv/bin/python -m app.worker
+```
+
+API 和 worker 必须使用相同配置；worker 不带自动 reload，修改执行代码后需手动重启。Redis 模式不会在队列故障时自动切换为本地执行；提交失败返回 503。Redis URL 中的密码特殊字符需做 URL 编码。
+
 ### 仅 MCP 创作
 
-只探索、试跑和保存脚本时，可使用最小入口，不需要前端、Redis 或 worker，仍需要 MySQL：
+只需要 MCP 时可使用最小入口，不启动前端和管理 REST。默认 SQLite/local 模式同样支持保存和持久执行脚本，无需 MySQL、Redis 或 worker：
 
 ```bash
 cd backend
@@ -120,7 +149,7 @@ cd backend
 
 创作链路为 `open_page` / `browse_page` → `preview_script` → `create_script` / `update_script` → `close_page`。探索会话最多 4 个，空闲 10 分钟回收；试跑使用独立浏览器，代码须包含完整导航与采集步骤。启动单个 MCP 进程，避免会话分散。
 
-采集接口发布、开放应用与授权配置通过管理后台完成，MCP 仅提供脚本创作、验证、执行和全局变量管理。`run_script` 和已发布接口的持久任务仍需 Redis 与 worker；使用 DATA_VIEWS 的脚本也通过持久任务验证。
+采集接口发布、开放应用与授权配置通过完整管理后台完成，MCP 仅提供脚本创作、验证、执行和全局变量管理。`run_script` 和已发布接口的持久任务使用选定的执行后端，只有 redis 模式需要 Redis 与独立 worker；使用 DATA_VIEWS 的脚本也通过持久任务验证。
 
 MCP 可直接管理全局变量与用户提供的登录态，无需额外 Skills：
 
@@ -284,7 +313,7 @@ CLOAKBROWSER_HUMANIZE=true
 
 官方当前版本每次启动均需许可证；可通过官方 `cloakbrowser login` 获取/保存授权，或自行将密钥写入 .env。首次授权启动自动下载独立浏览器二进制（约 200 MB），建议先在 backend 目录运行 `./venv/bin/python -m cloakbrowser install` 预下载，避免第一次采集被下载耗时影响。安装命令也需要已配置的授权；.env 中的密钥可由平台设置读取，官方 CLI 则读取导出的环境变量或其登录缓存。
 
-首次配置许可证等环境项后重启 API 与唯一 worker。在后台「MCP 服务 → 采集浏览器」可随时开启或关闭 CloakBrowser，自动保存到平台数据库，无需重启。新建探索页面、试跑、正式任务和录制启动时读取最新开关；已打开页面与运行中的任务继续使用原引擎。关闭时使用标准 Playwright。
+首次配置许可证等环境项后重启服务（Redis 模式还需重启唯一 worker）。在后台「MCP 服务 → 采集浏览器」可随时开启或关闭 CloakBrowser，自动保存到平台数据库，无需重启。新建探索页面、试跑、正式任务和录制启动时读取最新开关；已打开页面与运行中的任务继续使用原引擎。关闭时使用标准 Playwright。
 
 数据库开关优先于 `BROWSER_ENGINE`，首次尚未保存时使用该环境默认值（缺省为 Playwright）。管理端 `GET/PUT /api/mcp/browser-settings` 读取/保存开关，PUT 请求体为 `{"cloakbrowser_enabled": true}`；不通过此接口读取或修改许可证。MCP 页面和 `/api/health` 显示所选引擎与配置条件；该状态不等于二进制已安装或许可证已通过远端校验。缺少 SDK/许可证时拒绝开启；实际启动失败显式报错，不自动降级。
 
@@ -317,4 +346,4 @@ OUTPUTS["items"] = await page.locator("article").all_inner_texts()
 # links = COLLECT.unique_urls(hrefs, page.url)
 ```
 
-页面自身的资源加载、原生 `context.request`、`evaluate` 中的网络请求和自建浏览器不受主动操作节流；浏览器缓存和正常资源加载保持原生行为，不做全量路由拦截。使用上述入口、批量提取已有数据、限定分页范围并去重，减少重复请求。MCP 页面与健康接口展示当前策略；配置项见 `.env.example` 的 `COLLECTION_*`，修改后重启 API 与唯一 worker。
+页面自身的资源加载、原生 `context.request`、`evaluate` 中的网络请求和自建浏览器不受主动操作节流；浏览器缓存和正常资源加载保持原生行为，不做全量路由拦截。使用上述入口、批量提取已有数据、限定分页范围并去重，减少重复请求。MCP 页面与健康接口展示当前策略；配置项见 `.env.example` 的 `COLLECTION_*`，修改后重启服务（Redis 模式还需重启唯一 worker）。

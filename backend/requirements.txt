@@ -1,7 +1,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 sqlalchemy==2.0.52
-aiosqlite==0.20.0  # 平台库已切 MySQL，此项仅供 scripts/migrate_sqlite_to_mysql.py 读 SQLite 源
+aiosqlite==0.20.0  # 默认 SQLite 平台库驱动
 pydantic>=2.11,<3
 pydantic-settings==2.6.1
 pytest==9.1.1
@@ -9,10 +9,10 @@ httpx[socks]==0.27.2
 playwright==1.64.1
 cloakbrowser==0.7.2
 python-multipart==0.0.17
-aiomysql==0.2.0  # 平台主库驱动 + 数据源查询
+aiomysql==0.2.0  # 可选 MySQL 主库驱动 + 数据源查询
 cryptography>=42.0.0
-arq==0.28.0  # 执行任务队列（worker 进程）
-redis==5.3.1  # Redis 客户端（日志 pub/sub、队列状态）
+arq==0.28.0  # 可选 Redis 执行后端（独立 worker）
+redis==5.3.1  # Redis 模式日志 pub/sub 与队列状态；local 模式不连接
 black==24.8.0
 sqlglot==30.17.0
 mcp==1.29.1

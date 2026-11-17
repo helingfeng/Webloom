@@ -18,6 +18,7 @@ import json
 from fastapi import WebSocket
 
 from app.database import AsyncSessionLocal
+from app.config import settings
 from app.models.execution import Execution
 from app.services.log_bus import logs_channel, split_db_lines
 from app.task_queue import get_pool
@@ -59,9 +60,10 @@ async def stream_execution_logs(websocket: WebSocket, execution_id: int) -> None
     try:
         pubsub = None
         try:
-            pool = await asyncio.wait_for(get_pool(), timeout=_SUBSCRIBE_TIMEOUT)
-            pubsub = pool.pubsub()
-            await pubsub.subscribe(logs_channel(execution_id))
+            if settings.execution_backend == "redis":
+                pool = await asyncio.wait_for(get_pool(), timeout=_SUBSCRIBE_TIMEOUT)
+                pubsub = pool.pubsub()
+                await pubsub.subscribe(logs_channel(execution_id))
         except Exception:
             pubsub = None
 
@@ -76,7 +78,10 @@ async def stream_execution_logs(websocket: WebSocket, execution_id: int) -> None
         # WS 流中断本身由前端轮询兜底，但异常不能静默：打印便于排障
         import sys
 
-        print(f"[ws] log stream for execution {execution_id} interrupted: {exc!r}", file=sys.stderr)
+        print(
+            f"[ws] log stream for execution {execution_id} interrupted: {exc!r}",
+            file=sys.stderr,
+        )
     finally:
         try:
             await websocket.close()

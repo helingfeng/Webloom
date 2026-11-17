@@ -1,11 +1,18 @@
-from sqlalchemy import BigInteger
+from pathlib import Path
+
+from sqlalchemy import BigInteger, Integer, event
+from sqlalchemy.engine import make_url
 from sqlalchemy.dialects.mysql import BIGINT
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from app.config import settings
 
-# 统一主键/ID 列类型：MySQL 下为 bigint unsigned，其他方言回退 BigInteger
-BigIntUnsigned = BigInteger().with_variant(BIGINT(unsigned=True), "mysql")
+# SQLite 必须使用 INTEGER PRIMARY KEY 才有自增行为，不能仅依赖整数亲和性。
+BigIntUnsigned = (
+    BigInteger()
+    .with_variant(BIGINT(unsigned=True), "mysql")
+    .with_variant(Integer(), "sqlite")
+)
 
 _engine_kwargs: dict = {
     "echo": False,
@@ -17,8 +24,23 @@ _engine_kwargs: dict = {
 if settings.database_url.startswith("mysql"):
     _engine_kwargs["pool_size"] = settings.database_pool_size
     _engine_kwargs["max_overflow"] = settings.database_max_overflow
+elif settings.database_url.startswith("sqlite"):
+    database_path = make_url(settings.database_url).database
+    if database_path and database_path != ":memory:":
+        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
+    _engine_kwargs["connect_args"] = {"timeout": 30}
 
 engine = create_async_engine(settings.database_url, **_engine_kwargs)
+
+if engine.dialect.name == "sqlite":
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _configure_sqlite(connection, _record):
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.close()
+
 
 AsyncSessionLocal = async_sessionmaker(
     engine,

@@ -11,9 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     app_name: str = "采织 Webloom"
-    database_url: str = (
-        "mysql+aiomysql://root:helingfeng@127.0.0.1:3306/fishcode?charset=utf8mb4"
-    )
+    database_url: str = f"sqlite+aiosqlite:///{BASE_DIR / 'storage' / 'webloom.db'}"
     storage_dir: Path = BASE_DIR / "storage"
     scripts_dir: Path = BASE_DIR / "storage" / "scripts"
     executions_dir: Path = Path(tempfile.gettempdir()) / "atp_executions"
@@ -54,10 +52,11 @@ class Settings(BaseSettings):
             timezone=self.cloakbrowser_timezone,
         )
 
-    # ---- 执行队列（Redis + arq worker）----
+    # ---- 执行后端：local 无外部队列；redis 使用独立 arq worker ----
+    execution_backend: Literal["local", "redis"] = "local"
     redis_url: str = "redis://127.0.0.1:6379/0"
     # worker 最大并发执行数（每个执行 = 1 个 Python 子进程 + 1 个 Chromium 实例）
-    max_concurrent_executions: int = 5
+    max_concurrent_executions: int = Field(default=5, ge=1, le=100)
 
     # ---- 数据采集缓存与连接池 ----
     # 数据视图预取结果 TTL 缓存秒数（仅 worker 侧；0 关闭缓存）
@@ -74,7 +73,7 @@ class Settings(BaseSettings):
     open_api_sign_ttl_seconds: int = 300
 
     class Config:
-        env_file = ".env"
+        env_file = BASE_DIR / ".env"
 
 
 settings = Settings()
